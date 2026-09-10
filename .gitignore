@@ -30,3 +30,6 @@ forge*changelog.txt
 
 # Obsidian
 .obsidian
+
+# Jar (Remove after compat mod is published)
+/libs/*.jar

@@ -9,6 +9,9 @@ dependencies {
     implementation "net.neoforged:neoforge:${neo_version}"
 
     implementation "${customgun_maven}"
+
+    implementation files(machine_max_local)
+    implementation files(spark_core_local)
 }
 
 jar {
