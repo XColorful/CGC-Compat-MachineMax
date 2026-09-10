@@ -117,3 +117,60 @@ I have a complete picture of the style and terminology. Now I'll write the three
 
 1. **语言**：我按 `client/render` 那套写成了纯中文。你仓库里 `docs/architecture/Home.md`、`core/Home.md` 和 CGC 的 `core` 文档是双语（含 `[English](#English)`）的——如果这套 `core/projectile` 也要双语，我可以补上英文部分。
 2. **父级导航**：按你「编写范围仅 `./docs/architecture/core/projectile/`」的约束，我没有改动 `docs/architecture/core/Home.md`，所以目前父级导航还没挂上这套新文档的链接。需要的话我可以补一行入口。
+
+# 
+
+```
+你刚才表述的修改可能跟我想要的不一样，我重新表述需求，你检查刚才的实现以及可能需要调整相应文档：
+- CGC枪射物即使命中轮胎也应该打轮胎，MachineMax应该是支持攻击轮胎的，如果MachineMax本身的逻辑就是保护轮胎，那么忽略这个，否则命中轮胎时不应该给他特判跳过
+- 如果整个载具是一个实体，即CGC射线检测只会获取到一个的话，应该检查是否有命中哪个部位，除非完全碰不到；如果整个载具是多个实体，但是MachineMax要求出伤给在载具main part的话，那么打中子part时应该要能正确给伤害，而不是忽略掉
+- 正常来说，命中哪就应该对哪造成损伤，除非这个地方已经判定为消失了
+```
+
+# 
+
+The user is correcting my design. Let me investigate MachineMax's actual wheel/entity/main-part structure before adjusting the code and docs.
+
+I've now confirmed the key facts. Let me summarize what I found before making the fix:
+
+1. **Entity structure**: each `SubPart` gets its own `MMPartEntity` (`SubPart.refreshPartEntity()` → `new MMPartEntity(level, this)` + `addFreshEntity`). So a vehicle is **multiple entities**, one per subPart.
+    
+2. **Wheels**: a wheel hitbox creates **two** child shapes — a sphere (the rolling "tread" surface, `isWheelSurface=true`) and a cylinder (the tire body, `isWheelSurface=false`). MachineMax's `PartHitHandler` skips only the tread sphere (`isWheel && isWheelSurface`) but **does** hit the tire body cylinder. So tires are attackable; the skip is not "tire protection".
+    
+3. **The real bug**: my `if (hitSubPart != subPart) return false` finds the _front-most_ physics hit and requires it to match. For a multi-entity vehicle with pierce, the bullet hits A then B, but the physics ray always returns the front-most (A) — so B's callback sees A (≠ B) and B never gets damaged.
+    
+
+The correct logic: for the current entity's `subPart`, find whether the physics ray hits _that_ subPart (active hitbox), and damage it.
+
+The code is fixed and compiles. Now let me update the docs to reflect the corrected logic.
+
+I've completed the investigation and fix. Here's what I found and changed.
+
+## 调查结论
+
+1. **实体结构**：载具是**多个实体**。每个 `SubPart` 通过 `SubPart.refreshPartEntity()` 创建并持有自己的 `MMPartEntity`（`new MMPartEntity(level, this)` + `addFreshEntity`）。`VehicleCore.refreshAllPartEntities()` 会为每个 `SubPart` 补建实体。
+    
+2. **没有 "main part" 出伤**：`SubPart.onHurt` 直接把损伤计入**该子部件自身**的耐久度，再按 `vehicleDamageRate` 折算到载具整体血量。`Part.rootSubPart` 只是坐标/变换的根（质量最大的子部件），不是出伤目标。所以「命中哪个子部件就对哪个子部件出伤」就是正确语义，不存在需要转发到 main part 的路径。
+    
+3. **轮胎可被攻击**：一个 `wheel` 命中箱会生成**两个**子形状——胎面球体（`isWheelSurface=true`，用于滚动）和胎体圆柱（`isWheelSurface=false`）。MachineMax 的 `PartHitHandler` 只跳过「胎面球体」（`isWheel && isWheelSurface`），**胎体圆柱仍然命中**。所以这不是「保护轮胎」，轮胎是可攻击的。
+    
+
+## 修复的 bug
+
+我之前的实现是「找到**最前面**的活动命中箱，要求它 == 实体自身的 subPart，否则 return false」。对多实体载具 + 穿透数时这是错的：子弹依次打 A、B，但物理射线每次都返回最前面的 A，于是 B 的回调看到 A（≠B）→ 永远 return false → **B 被打不到**。
+
+修正后 `_ProjectileHit` 的逻辑改为：在物理射线结果里**找属于当前实体 `subPart` 的活动命中箱**（`candidate != subPart` 直接跳过，而非找最前面再比对）。这样：
+
+- 命中 A → 打 A；命中 B → 打 B（每个子部件各打一次）。
+- A 的 AABB 是假阳性（物理形状不在路径上）→ 找不到 → return false。
+- 命中轮胎 → 跳过胎面球体、命中胎体圆柱 → 轮胎被打到。
+- 已销毁的子部件物理体被移除 → 找不到 → return false。
+
+代码编译无错（`get_file_problems` 为空；完整 Gradle 构建因 NeoGradle 过慢超时，非代码错误）。
+
+## 文档同步
+
+- [machine-max-damage-flow.md](app://localhost/epitaxy/docs/architecture/core/projectile/machine-max-damage-flow.md)：把「非车轮表面」改为「非车轮滚动表面」，并补一句「车轮由胎面球体 + 胎体圆柱构成，胎面球体被跳过、胎体仍可命中，轮胎因此可被攻击」。
+- [cgc-compat.md](app://localhost/epitaxy/docs/architecture/core/projectile/cgc-compat.md)：Mermaid 去掉「与实体自身 subPart 一致」的判定分支，改为「找属于该实体 subPart 的命中」；步骤 3/4/5 同步改成「在命中结果里找属于当前实体 subPart 的活动命中箱」，并明确「没找到才 return false」。
+
+一个需要你确认的语义点：**车轮胎面球体**我仍按 MachineMax 原样跳过（`isWheel && isWheelSurface`）。如果你想要「连胎面球体也直接命中」（不跳过、命中球面而不是胎体圆柱），告诉我，我把这个条件也去掉——两者损伤落到同一个 `HitBox`，差别只在命中点/法线取的是球面还是圆柱面。

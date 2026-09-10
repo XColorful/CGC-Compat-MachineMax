@@ -28,12 +28,10 @@ CGC 的枪射物（`GunProjectile`，继承原版 `Projectile`）用自己的射
 flowchart TD
     RAY["CGC 枪射物射线检测<br/>命中 MMPartEntity"] --> CALL["MMPartEntityMixin<br/>cgc$onProjectileImpact"]
 
-    CALL --> PHIT["_ProjectileHit<br/>沿枪射物位移做物理射线检测"]
+    CALL --> PHIT["_ProjectileHit<br/>沿枪射物位移做物理射线检测<br/>找属于该实体 subPart 的命中"]
 
-    PHIT -->|"未命中活动命中箱"| FALSE["返回 false<br/>不消耗穿透数"]
-    PHIT -->|"命中活动命中箱"| MATCH{"与实体自身 subPart 一致"}
-    MATCH -->|"否"| FALSE
-    MATCH -->|"是"| ONHURT["按 CGC 伤害构造 PartDamageData<br/>SubPart.onHurt 出伤"]
+    PHIT -->|"没命中该实体的活动命中箱"| FALSE["返回 false<br/>不消耗穿透数"]
+    PHIT -->|"命中该实体的活动命中箱"| ONHURT["按 CGC 伤害构造 PartDamageData<br/>SubPart.onHurt 出伤"]
     ONHURT --> TRUE["返回 true<br/>消耗穿透数"]
 ```
 
@@ -41,11 +39,11 @@ flowchart TD
 
 1. 从 CGC 命中的实体取出 `subPart`。
 2. 沿枪射物本 tick 位移对物理世界做射线检测。
-3. 找到第一个命中活动命中箱、非车轮表面的 `SubPart`。
-4. 命中的 `SubPart` 与实体自身不一致，或没有命中活动命中箱时，返回 `false`，表示不消耗穿透数、不打该部位。
-5. 一致时按 CGC 的距离衰减伤害构造 `PartDamageData`，调用 `subPart.onHurt` 出伤，返回 `true`。
+3. 在命中结果里找属于当前实体 `subPart` 的活动命中箱（跳过车轮的滚动表面）。
+4. 没找到时返回 `false`，表示不消耗穿透数、不打该部位。
+5. 找到时按 CGC 的距离衰减伤害构造 `PartDamageData`，调用 `subPart.onHurt` 出伤，返回 `true`。
 
-判定只针对当前实体，不预测子弹随后是否会命中其他实体。返回 `false` 时子弹继续飞行，由 CGC 的命中循环处理后续实体。
+判定只针对当前实体的 `subPart`，不预测子弹随后是否命中其他实体。返回 `false` 时子弹继续飞行，由 CGC 的命中循环处理后续实体。
 
 ## 与 MachineMax 原本流程的对应
 

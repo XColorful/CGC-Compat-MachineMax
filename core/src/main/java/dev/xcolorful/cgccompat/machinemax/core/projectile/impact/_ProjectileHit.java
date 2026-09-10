@@ -49,8 +49,8 @@ public class _ProjectileHit {
         }
 
         // --------MachineMax 碰撞箱判定--------
-        // 以 CGC 射线检测为准, 沿枪射物本 tick 位移做物理射线检测, 找第一个命中
-        // 活动碰撞箱(非车轮)的 SubPart
+        // 以 CGC 射线检测为准, 沿枪射物本 tick 位移做物理射线检测, 找属于当前实体
+        // subPart 的活动命中箱(跳过车轮的滚动表面)
         Vec3 startPos = gunProjectile.position();
         Vec3 deltaMovement = gunProjectile.getDeltaMovement();
         if (deltaMovement.lengthSqr() < 1.0E-6) {
@@ -59,7 +59,6 @@ public class _ProjectileHit {
         Vector3f start = PhysicsHelperKt.toBVector3f(startPos);
         Vector3f end = PhysicsHelperKt.toBVector3f(startPos.add(deltaMovement));
 
-        SubPart hitSubPart = null;
         HitBox hitBox = null;
         Vector3f hitPoint = null;
         Vector3f hitNormal = null;
@@ -68,7 +67,7 @@ public class _ProjectileHit {
                 .getWorld().getWorldSnapshot().rayTest(start, end);
         for (PhysicsRayTestResult result : results) {
             PhysicsHost owner = PhysicsBodyExtensionKt.getOwner(result.getCollisionObject());
-            if (!(owner instanceof SubPart candidate)) {
+            if (!(owner instanceof SubPart candidate) || candidate != subPart) {
                 continue;
             }
             if (candidate.isWheel(result.triangleIndex()) && candidate.isWheelSurface(result.triangleIndex())) {
@@ -78,15 +77,14 @@ public class _ProjectileHit {
             if (!candidateHitBox.isActive()) {
                 continue;
             }
-            hitSubPart = candidate;
             hitBox = candidateHitBox;
             hitPoint = start.add(end.subtract(start).mult(result.getHitFraction()));
             hitNormal = result.getHitNormalLocal(null);
             break;
         }
 
-        // 没命中活动碰撞箱, 或命中的是别的 subPart -> 不消耗穿透数
-        if (hitSubPart == null || hitSubPart != subPart) {
+        // 没命中当前实体的活动命中箱 -> 不消耗穿透数
+        if (hitBox == null) {
             return false;
         }
 
