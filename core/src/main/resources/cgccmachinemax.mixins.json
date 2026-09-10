@@ -1,0 +1,11 @@
+{
+  "package": "dev.xcolorful.cgccompat.machinemax.core.mixin",
+  "minVersion": "0.8",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "cgccmachinemax.refmap.json",
+  "mixins": [
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

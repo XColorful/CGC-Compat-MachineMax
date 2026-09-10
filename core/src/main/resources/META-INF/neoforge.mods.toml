@@ -13,6 +13,9 @@ credits="${mod_credits}"
 authors="${mod_authors}"
 description='''${mod_description}'''
 
+[[mixins]]
+config="cgccmachinemax.mixins.json"
+
 [[dependencies.${mod_id}]]
 modId="${target_modloader}"
 type="required"
