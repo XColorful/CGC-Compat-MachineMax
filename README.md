@@ -1,6 +1,6 @@
 # 自定义枪械永续兼容：MachineMax | CGC Compat: MachineMax
 
-[中文](#自定义枪械永续兼容：MachineMax) | [English](#cgc-compat:-machinemax)
+[中文](#自定义枪械永续兼容machinemax) | [English](#cgc-compat-machinemax)
 
 # 自定义枪械永续兼容：MachineMax
 
