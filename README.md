@@ -8,8 +8,8 @@
 - 提供 MachineMax 兼容支持
 
 ---
-
-`该模组需要安装在服务端`
+  
+`该模组需要安装在服务端和客户端`
 
 ## 使用说明
 
@@ -35,8 +35,8 @@ This mod is a compatibility mod for [Custom Gun Continued](https://github.com/XC
 - Provides compatibility support for MachineMax
 
 ---
-
-`This mod needs to be installed on the server.`
+  
+`This mod needs to be installed on both the server and the client.`
 
 ## Usage Instructions
 

@@ -4,7 +4,8 @@
   "compatibilityLevel": "JAVA_21",
   "refmap": "cgccmachinemax.refmap.json",
   "mixins": [
-    "entity.MMPartEntityMixin"
+    "entity.MMPartEntityMixin",
+    "entity.projectile.GunProjectileMixin"
   ],
   "injectors": {
     "defaultRequire": 1
