@@ -19,6 +19,12 @@
     - [CurseForge](https://www.curseforge.com/minecraft/mc-mods/custom-gun-continued) | [Modrinth](https://modrinth.com/mod/custom-gun-continued) | [Github Releases](https://github.com/XColorful/Custom-Gun-Continued/releases)
 - MachineMax
 
+### 主要特色
+
+当安装本模组后，以下内容自动生效：
+- 使[自定义枪械永续](https://github.com/XColorful/Custom-Gun-Continued)的枪射物能够对 MachineMax 载具造成伤害
+- 修复 MachineMax 镜头调整与枪械后坐力之间的冲突
+
 ## 内容披露
 
 ### 衍生内容
@@ -45,6 +51,12 @@ This mod is a compatibility mod for [Custom Gun Continued](https://github.com/XC
 - Custom Gun Continued
     - [CurseForge](https://www.curseforge.com/minecraft/mc-mods/custom-gun-continued) | [Modrinth](https://modrinth.com/mod/custom-gun-continued) | [Github Releases](https://github.com/XColorful/Custom-Gun-Continued/releases)
 - MachineMax
+
+### Main Features
+
+When this mod is installed, the following features take effect automatically:
+- Allows gun projectiles from [Custom Gun Continued](https://github.com/XColorful/Custom-Gun-Continued) to deal damage to MachineMax vehicles
+- Fixes the conflict between MachineMax camera adjustments and gun recoil
 
 ## Content disclosures
 
