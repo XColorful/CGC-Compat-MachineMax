@@ -97,3 +97,35 @@ Build passes. Here's what I found and what I changed.
 
 完成后通知我检查，不要提交，也不需要fetch origin，当前只有执行这一个任务
 ```
+
+# 
+
+Now I understand the CGC event system. Let me rewrite `GunCameraCompat` to use CGC's `IEventHandler` and register it properly.
+
+Let me examine the NeoForge `ViewportEvent.ComputeCameraAngles` implementation to understand how it processes the angles, which may be key to the compensation issue.
+
+Let me check the `get_file_problems` on my current code and then address the compensation issue.
+
+Now let me update the documentation to reflect the CGC event registration (instead of the earlier `@EventBusSubscriber` approach). Let me check the current doc content.
+
+改动完成，编译通过。下面是本次的修改与说明。
+
+## 任务 1：注册改成 CGC 事件监听（已完成）
+
+- [GunCameraCompat.java](app://localhost/epitaxy/CGC-Compat-MachineMax/core/src/main/java/dev/xcolorful/cgccompat/machinemax/client/renderer/item/gun/GunCameraCompat.java) 改为实现 CGC 的 `IEventHandler`（参考 `GunCameraHelper` 的写法），不再 `import net.neoforged`。
+- [CgccMachineMaxClient.java](app://localhost/epitaxy/CGC-Compat-MachineMax/core/src/main/java/dev/xcolorful/cgccompat/machinemax/client/CgccMachineMaxClient.java) 里用 `CoreEventHandlers.register(CustomGun.getEventRegister(), ..., COMPUTE_CAMERA_ANGLES_EVENT, EventPriority.LOW, false)` 注册，即比 MachineMax 的 NORMAL 低一级。
+- 已确认 `./core/` 下没有任何 `net.neoforged` 引用（仅 `neoforge-compat` 入口保留）。
+
+## 任务 2：压枪补偿（pitch clamp）
+
+在还原朝向时对 pitch 加了 `Mth.clamp(getViewXRot(partialTick), -90, 90)`。
+
+原因：CGC 后坐力是直接 `LocalPlayer#setXRot` 改玩家真实 pitch，而 `setXRot` 不 clamp（原版的 `turn` 才会 clamp 到 [-90,90]）。原版 CGC 里摄像机读到的是 `turn` 已经 clamp 过的值；而我在 LOW 优先级、后坐力之后读 `getViewXRot`，拿到的是被后坐力顶出 [-90,90] 的未 clamp 值——镜头会被顶到「越过正头顶」，然后鼠标下拖又被原版 clamp 拉回 -90，看起来就是「往下拖没反应」。clamp 回 [-90,90] 后就和 CGC 单独运行时的表现一致。
+
+## 需要你验证
+
+任务 1 是确定的；任务 2 的 clamp 是我基于代码推的根因，**没有跑游戏验证**。麻烦你实测一下「射击时按蹲 → 压枪」是否恢复。如果还不行，请告诉我：现象是「往下拖镜头纹丝不动」还是「往下拖了但压不住（横向也在飘）」，我好进一步定位（后者可能还要处理 yaw）。
+
+另外：文档 [cgc-compat.md](app://localhost/epitaxy/CGC-Compat-MachineMax/docs/architecture/client/camera/cgc-compat.md) 已同步更新为 CGC 事件注册 + pitch clamp 的描述。
+
+未提交，未 fetch。
