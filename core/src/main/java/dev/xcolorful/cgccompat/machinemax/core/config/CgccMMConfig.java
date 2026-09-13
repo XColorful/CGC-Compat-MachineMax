@@ -22,7 +22,7 @@ public final class CgccMMConfig {
 
     // --------默认值--------
 
-    private static final boolean DEFAULT_ALLOW_ENTITY_REMOVAL = false;
+    private static final boolean DEFAULT_ALLOW_ENTITY_REMOVAL = true;
     private static final boolean DEFAULT_DISCARD_ON_DETACH = true;
     private static final boolean DEFAULT_CONCURRENT_SOUND_LIMIT_ENABLED = false;
     private static final int DEFAULT_MAX_CONCURRENT_SOUNDS = 8;
@@ -35,8 +35,11 @@ public final class CgccMMConfig {
     private static final int MIN_RENDER_DISTANCE = 1;
 
     /**
-     * {@code false}（默认）时 {@code Entity#discard()} 无法移除部件实体，会让 {@code kill @e} 等
-     * 主动清理手段失效；置 {@code true} 后这些手段正常生效，但被移除的部位会重新生成。
+     * 是否允许 {@code kill @e} / {@code Entity#discard()} 等主动手段移除部件实体。
+     * <p>
+     * {@code false} 时拦截这些移除，部件实体不会被主动清掉（小游戏模组的自动清理会失效）；
+     * {@code true}（默认）时这些手段正常生效：连同该 part 一起从载具上摘除，
+     * 避免 {@code SubPart#postTick} 把实体重建回来、也避免它留在载具存档里。
      */
     public static boolean entityRemovalAllowed = DEFAULT_ALLOW_ENTITY_REMOVAL;
 

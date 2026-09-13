@@ -336,3 +336,163 @@ Now I'll implement the fix — defer the removal to `LevelTickEvent.Post` so `Pa
 服务端移除、客户端通过移除包同步，这条链路是权威的；`removePart` 过程中若又产生新的分裂，会再次入队，下一 tick 继续处理，最终收敛。
 
 改动仍未提交，建议进游戏验证：打轮胎后脱离部件应立即消失，且退出重进不会回来。
+
+# 
+
+```
+那照你这么说的话，如果allowEntityRemoval，是否会导致实体残留在存档里？是否可以默认启用allowEntityRemoval，但是把removeal时的残留给清理掉（如断subpart+不写存档）？
+```
+
+# 
+
+Good question — let me verify how entities are actually removed on chunk unload, because that determines whether hooking `discard()` is even safe.
+
+Let me verify what `kill @e` actually calls on an `MMPartEntity`.
+
+Key finding: let me check whether `kill @e` even goes through `discard()`, and find internal callers.
+
+Let me confirm `Part`'s field visibility before rewriting the removal mixin.
+
+Now I have the full picture. Let me rewrite the removal mixin to cover `kill @e` (which goes through `remove(KILLED)`, not `discard()`) and to clean up the subPart.
+
+编译通过。你这个方向是对的，但过程中我发现了一个之前漏掉的关键事实。
+
+## 先纠正一点：`kill @e` 根本不走 `discard()`
+
+查了 1.21.1 的 mappings 和 vanilla 源码：
+
+- `KillCommand` → `entity.kill()` → `Entity#kill()` → `remove(RemovalReason.KILLED)` → `setRemoved(KILLED)`
+- `Entity#discard()` → `remove(RemovalReason.DISCARDED)`
+- 区块卸载 → `PersistentEntitySectionManager` 直接调 `setRemoved(UNLOADED_TO_CHUNK)`，**绕过** `discard()`/`remove()`
+- `VehicleEntity`（1.21.1）没有覆写 `kill()`/`discard()`
+
+所以我之前那个只挂 `discard()` 的 mixin **从来没覆盖 `kill @e`** —— 这就是为什么 `allowEntityRemoval` 对 `kill @e` 看起来没作用。
+
+## 回答你的问题
+
+**1. 会不会有实体残留在存档里？**  
+不会。"残留"这个担心不成立：`MMPartEntity` 是 `noSave()` 的瞬态实体，**任何情况下都不进存档**。真正进存档的是 `VehicleCore`/`Part`/`SubPart`。  
+所以开不开 `allowEntityRemoval`，实体都不会留在存档里。之前"实体又被重建回来"是 `SubPart#postTick` 干的，跟存档无关。
+
+但反过来说：**只让 `discard()`/`remove()` 放行是不够的** —— 实体被移除了，`SubPart` 还在，`postTick` 下一 tick 就把实体建回来。所以"让移除生效"等价于"要连 subPart 一起摘掉"，也就是你说的"断 subpart + 不写存档"。
+
+**2. 可以默认启用 + 清理残留吗？**  
+可以，而且这是唯一能让 `kill @e` 真正生效的做法。已实现：
+
+[MMPartEntityRemovalMixin.java](app://localhost/epitaxy/core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/mixin/entity/MMPartEntityRemovalMixin.java)：
+
+- 接管两条路径：`discard()`，以及 `/kill` 走的 `remove(KILLED)`。
+- **不碰 `RemovalReason.DISCARDED`** —— 那是 MachineMax 自己在用（`SubPart#destroy` → `entity.remove(DISCARDED)`、`baseTick` 清理孤立实体、`readSpawnData`），碰了会破坏原生流程。`SubPart#destroy` 内部再调 `remove(DISCARDED)` 不会再触发本 mixin，所以没有递归。
+- 启用（默认 `true`）时：连同该 part 一起 `VehicleCore#removePart` 摘除 → subPart 标 `isRemoved`、从 `partNet`/`partMap` 摘掉 → 实体不会被重建，载具存档里也没有它了。
+- 只服务端执行；客户端不做载具结构改动，等服务端下发的 `PartRemovePayload`。这个方向很重要 —— 客户端在实体离开同步范围时会移除实体，若在客户端也摘 part，会误拆载具。
+- 未启用时：拦截移除，部件实体保持不被主动清掉。
+
+`allowEntityRemoval` 默认改成 `true`。理由是这跟原版语义一致（原版 `kill @e` 本来就能清掉船/矿车），MachineMax 部件"删不掉"才是异常。
+
+## 需要你注意
+
+- 默认 `true` 后，`/kill @e`（不带 type 过滤）会**拆掉世界里所有载具**。这正是小游戏自动清理想要的语义，但如果你只是想清掉落物，得写 `kill @e[type=!machine_max:part]` 之类。
+- `discardOnDetach`（连接件撕裂后不保留）和 `allowEntityRemoval`（主动移除手段生效）现在是两个独立开关，互不干扰。
+
+改动未提交。建议实机验证两点：`kill @e[type=machine_max:part]` 后部件是否彻底消失且重进不回来；以及打轮胎脱落的部分是否随 `discardOnDetach` 一起被清掉。
+
+# 
+
+```
+其他模组代码可能不是用remove(KILLED)，而是用discard，需要确保别的模组利用discard来移除实体的时候，本兼容模组的config能让其生效来正常移除
+也就是不管哪个reason，应该都走同样的清理逻辑
+```
+
+# 
+
+Good catch — and I verified there's a safety property that makes this clean. Let me confirm the exact ordering in MachineMax's own destroy path first.
+
+All three MachineMax-internal `remove(DISCARDED)` sites run with `subPart` already null. So `subPart != null` is a reliable discriminator — I can drop reason-based branching entirely.
+
+Important refinement: after `removePart` the entity is already removed via `SubPart#destroy`, so I must cancel the outer call to avoid a double `setRemoved`.
+
+按你说的改了：不再按 reason 分支，所有移除请求走同一套逻辑。
+
+## 为什么可以安全地不看 reason
+
+关键在于区分「外部主动移除」和「MachineMax 自己移除」不能靠 reason，而要靠 `subPart` 是否还绑着。我核对了 MachineMax 内部全部三处 `remove(DISCARDED)`，触发时 `subPart` 一定已经是 null：
+
+|位置|场景|触发时 subPart|
+|---|---|---|
+|`SubPart#destroy`|部件被摧毁/正常移除|先 `entity.subPart = null` 再 `remove`|
+|`MMPartEntity#baseTick`|无匹配部件的孤立实体，超 100 tick 清理|在 `if (subPart == null)` 分支里|
+|`MMPartEntity#readSpawnData`|客户端收到 `hasPart == false` 的新实体|新 spawn，还没绑|
+
+所以 `subPart != null` 就是「这是个还挂在载具上的活部件，有人在外部移除它」的可靠判据。这样任何模组用 `discard()`、`remove(任意 reason)`、`kill @e`（`kill()` → `remove(KILLED)`）都能命中同一套清理逻辑。
+
+## 改动
+
+[MMPartEntityRemovalMixin.java](app://localhost/epitaxy/core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/mixin/entity/MMPartEntityRemovalMixin.java)：
+
+- `discard()` 和 `remove(RemovalReason)` 都注入，**不再判断 reason**。
+- `subPart == null || isRemoved()` → 放行（MachineMax 内部清理、重复移除）。
+- `entityRemovalAllowed == false` → 一律拦截。
+- `true`（默认）→ 服务端调 `VehicleCore#removePart` 把该 part 连 subPart 一起摘掉，**然后取消外层 remove**。
+- 客户端不做载具结构改动，等服务端 `PartRemovePayload`。
+
+有个细节值得说：清理后要**取消外层调用**，因为 `removePart` 内部经 `SubPart#destroy` 已经把实体移除了（`SubPart#destroy` 先把 `entity.subPart = null` 再 `remove(DISCARDED)`，此时我的守卫看到 subPart 已经是 null 就放行，不会再递归）。如果不取消，`setRemoved` 会被走第二遍，可能重复触发 level 的 `onRemove` 回调。
+
+## 一个刻意的例外
+
+只挂 `remove(RemovalReason)`，**没有挂 `setRemoved(RemovalReason)`**。因为区块卸载是 `PersistentEntitySectionManager` 直接调 `setRemoved(UNLOADED_TO_CHUNK)` 绕过 `remove()` 的，挂上去会导致区块卸载时误拆载具。所以如果某个模组不走 `discard()`/`remove()`/`kill()` 而是直接 `entity.setRemoved(...)`（很少见），这个 config 覆盖不到。
+
+## 提醒
+
+`entityRemovalAllowed` 默认 `true`，意味着 `kill @e`（不带 type 过滤）会拆掉世界里所有载具 —— 这和原版语义一致（原版 `kill @e` 本来就会清掉船/矿车），但如果你只想清掉落物，需要写成 `kill @e[type=!machine_max:part]`。
+
+编译已通过，未提交。建议实机验证：用 `kill @e` 和某模组的 discard 清理各测一次，确认部件都没了且退出重进不回来。
+
+# 
+
+```
+kill和其他模组的discard都没能移除，清掉之后还是会重建回来，还需要修改。
+```
+
+# 
+
+The user reports it still rebuilds — so my hooks likely aren't firing. Let me verify the injection targets properly, starting with whether `VehicleEntity` overrides these methods.
+
+Confirmed `VehicleEntity` doesn't override them — so they're inherited from `Entity`. Let me check whether MachineMax itself injects into inherited methods (precedent for whether Mixin supports it).
+
+Let me settle the Mixin semantics definitively — I'll check the Mixin library's method-resolution behaviour.
+
+Found the root cause. Let me confirm it and check `Entity`'s method names.
+
+Root cause confirmed: `discard()`/`remove()` are declared in `Entity`, not `MMPartEntity`. Mixin resolves the inherited method into a target (so no validation error and no crash), but the injection can never be written into `MMPartEntity` — a silent no-op. The fix is to mix into `Entity` directly with an `instanceof` guard.
+
+找到真正的原因了。
+
+## 根因：Mixin 挂错了类
+
+`discard()` 和 `remove(RemovalReason)` 都**声明在 `Entity` 上**，不在 `MMPartEntity` 上（`VehicleEntity` 也没覆写，我核对了 1.21.1 的 mappings：`kill() -> ap`、`discard() -> aq`、`remove(RemovalReason) -> a` 全部在 `Entity` 里）。
+
+而 Mixin 的行为是：`MixinTargetContext.getTargetMethod` 用 `findMethodInHierarchy(..., SUPER_CLASSES_ONLY, ...)` **能在父类里找到**这个方法，所以目标数量 > 0、`defaultRequire: 1` 校验通过、**不报错也不崩溃**；但注入是往 `MMPartEntity` 里写方法体，而那个类根本没有这两个方法的方法体 —— 写不进去，**静默失效**。
+
+这正好解释了你看到的现象：不崩溃，但 `kill @e` / `discard()` 都毫无作用，实体被移除后又被 `SubPart#postTick` 重建回来。
+
+## 修复
+
+- 新增 [EntityRemovalMixin.java](app://localhost/epitaxy/core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/mixin/entity/EntityRemovalMixin.java)：`@Mixin(Entity.class)`，注入 `discard()` 和 `remove(RemovalReason)`，用 `instanceof MMPartEntity` 过滤，只处理部件实体。
+- 删除 `MMPartEntityRemovalMixin.java`，[cgccmachinemax.mixins.json](app://localhost/epitaxy/core/src/main/resources/cgccmachinemax.mixins.json) 换成 `entity.EntityRemovalMixin`。
+- 清理逻辑不变：不按 reason 分支，靠 `subPart != null` 区分外部移除；启用时 `VehicleCore#removePart` 把 part 连 subPart 一起摘掉（既不会被重建，也不留在载具存档里），然后取消外层调用避免 `setRemoved` 走两遍；只在服务端做，客户端等服务端 `PartRemovePayload`。
+
+我顺带把其余 mixin 都过了一遍，确认没有同类问题 —— `ObjectManager#addSpiltVehicle` / `onPostTick`、`PartEntityRenderer#shouldRender`、`EntityType#clientTrackingRange`、`GunProjectile#<init>` 都声明在各自的目标类里，注入是有效的。（也就是说 `discardOnDetach` 之前不生效是另一个原因 —— 那个是 `PartRemovePayload` 早于 `ConnectorDetachPayload` 发出的发送顺序 bug，已经用延后到 `LevelTickEvent.Post` 修掉了，和这次是两回事。）
+
+## ⚠️ 你需要先改配置，否则这次修复看起来仍然"没用"
+
+你机器上的 `config/cgccmachinemax.json` 是**早期版本生成的**，里面键已经存在、值是 `false`：
+
+```json
+"allowEntityRemoval": false
+```
+
+加载器只对**缺失的键**套用新默认值，已存在的键会用文件里的值。所以它仍然是 `false` —— 那样修复后的钩子会**拦截**移除，`kill @e` 会变成"完全没反应"（连消失再重建都不会有）。
+
+请把该键改成 `true`，或者直接删掉 `config/cgccmachinemax.json` 让它按新默认（`true`）重新生成。
+
+编译已通过，未提交。验证时建议看两点：`kill @e` 后部件是否彻底不在（且重进存档不回来），以及日志里有没有 `MachineMax` 的 `找不到载具` 之类的报错。
