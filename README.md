@@ -1,11 +1,11 @@
-# 自定义枪械永续兼容：MachineMax | CGC Compat: MachineMax
+# 自定义枪械永续兼容：极械工坊 | CGC Compat: MachineMax
 
-[中文](#自定义枪械永续兼容machinemax) | [English](#cgc-compat-machinemax)
+[中文](#自定义枪械永续兼容极械工坊) | [English](#cgc-compat-machinemax)
 
-# 自定义枪械永续兼容：MachineMax
+# 自定义枪械永续兼容：极械工坊
 
 本模组是[自定义枪械永续](https://github.com/XColorful/Custom-Gun-Continued)的兼容模组。
-- 提供 MachineMax 兼容支持
+- 提供[极械工坊](https://github.com/Sweetzonzi/Machine-Max)兼容支持
 
 ---
   
@@ -17,13 +17,13 @@
 
 - 自定义枪械永续
     - [CurseForge](https://www.curseforge.com/minecraft/mc-mods/custom-gun-continued) | [Modrinth](https://modrinth.com/mod/custom-gun-continued) | [Github Releases](https://github.com/XColorful/Custom-Gun-Continued/releases)
-- MachineMax
+- 极械工坊
 
 ### 主要特色
 
 当安装本模组后，以下内容自动生效：
-- 使[自定义枪械永续](https://github.com/XColorful/Custom-Gun-Continued)的枪射物能够对 MachineMax 载具造成伤害
-- 修复 MachineMax 镜头调整与枪械后坐力之间的冲突
+- 使[自定义枪械永续](https://github.com/XColorful/Custom-Gun-Continued)的枪射物能够对极械工坊载具造成伤害
+- 修复极械工坊镜头调整与枪械后坐力之间的冲突
 
 在`./config/cgccmachinemax.json`可配置以下选项：
 - allowEntityRemoval：是否允许 _/kill_ 等方式移除载具
@@ -46,7 +46,7 @@
 # CGC Compat: MachineMax
 
 This mod is a compatibility mod for [Custom Gun Continued](https://github.com/XColorful/Custom-Gun-Continued).
-- Provides compatibility support for MachineMax
+- Provides compatibility support for [MachineMax](https://github.com/Sweetzonzi/Machine-Max)
 
 ---
   
