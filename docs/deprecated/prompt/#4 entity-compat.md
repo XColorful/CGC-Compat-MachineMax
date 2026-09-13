@@ -496,3 +496,63 @@ Root cause confirmed: `discard()`/`remove()` are declared in `Entity`, not `MMPa
 请把该键改成 `true`，或者直接删掉 `config/cgccmachinemax.json` 让它按新默认（`true`）重新生成。
 
 编译已通过，未提交。验证时建议看两点：`kill @e` 后部件是否彻底不在（且重进存档不回来），以及日志里有没有 `MachineMax` 的 `找不到载具` 之类的报错。
+
+# 
+
+```
+已经生效了。
+
+能否改成注入重载方法的方式来实现避免mixin到Entity，以及如果MachineMax之后更新时添加了重载的时候来强制崩溃来提醒更新兼容模组？
+```
+
+# 
+
+生效了就好。这两点都可以做——用**覆写**替代继承方法注入，再加一个启动自检。
+
+关键点：`discard()` 和 `kill()` 最终都会调 `Entity#remove(RemovalReason)`，而 `remove` **不是 final**（只有 `discard()`/`setRemoved()` 是 final）。所以在 `MMPartEntity` 上覆写 `remove` 一个方法就能覆盖所有移除入口，完全不需要碰 `Entity`。
+
+Now the startup tripwire.
+
+两点都做了，编译通过。
+
+## 1. 改用覆写，不再 mixin 到 `Entity`
+
+[MMPartEntityRemovalMixin.java](app://localhost/epitaxy/core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/mixin/entity/MMPartEntityRemovalMixin.java) 现在 `@Mixin(MMPartEntity.class)` 并直接覆写：
+
+```java
+@Override
+public void remove(RemovalReason reason) {
+    if (cgcc$handleExternalRemoval()) return;
+    super.remove(reason);
+}
+```
+
+**只覆写一个方法就够**，因为所有外部移除入口都汇入它（我核对了 vanilla 源码）：
+
+|入口|去向|
+|---|---|
+|`Entity#discard()`|→ `remove(DISCARDED)`|
+|`Entity#kill()`（`/kill` 走这里）|→ `remove(KILLED)`|
+|模组直接调 `entity.remove(reason)`|本体|
+|`Entity#setRemoved(reason)`|**不经过 `remove()`**|
+
+`remove` 不是 final 所以能覆写；`discard()` / `setRemoved()` 是 final 覆写不了 —— 但这正好不影响：前者走 `remove()`，后者是区块卸载专线（`PersistentEntitySectionManager` 直接调 `setRemoved(UNLOADED_TO_CHUNK)`），**绝不能碰**，碰了区块卸载就会误拆载具。所以覆写面反而比之前挂在 `Entity` 上更窄更安全。
+
+清理逻辑完全没动：不按 reason 分支、靠 `subPart != null` 区分外部移除、启用时 `removePart` 连 subPart 一起摘掉、客户端不做结构改动。
+
+## 2. MachineMax 改 API 时强制崩溃
+
+新增 [PartEntityRemovalGuard.java](app://localhost/epitaxy/core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/util/PartEntityRemovalGuard.java)，在 [CommonSetup.java:16](app://localhost/epitaxy/core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/init/CommonSetup.java:16) 的 `onCommonSetup()` 里调用。
+
+反射扫 `MMPartEntity` 和 `VehicleEntity` 的 `getDeclaredMethods()`，只要出现 `remove` / `discard` / `kill` / `setRemoved` 其中之一，就抛 `IllegalStateException` 崩掉，报错信息说明"移除兼容依赖所有移除汇入 `Entity#remove(RemovalReason)`，请更新兼容模组"。
+
+两个细节：
+
+- **要排除掉我们自己加的那个方法**。Mixin 覆写是真的把 `remove(RemovalReason)` 加进了 `MMPartEntity`，`getDeclaredMethods()` 能看到它，不排除的话自检必然误报。所以按 `remove` + 参数恰好是 `RemovalReason` 精确排除。
+- 如果 MachineMax 自己声明了**同签名**的 `remove(RemovalReason)`，Mixin 在加载时就会因为方法冲突直接报错崩溃 —— 这条路不需要自检重复覆盖。
+
+`VehicleEntity` 也一起扫，是因为原版万一在那层加了覆写同样会绕过我们的覆写（`VehicleEntity` 目前只声明了 `hurt`/`destroy`/`shouldSourceDestroy` 等，没有移除相关方法，所以今天能通过）。
+
+自检跑在 `FMLCommonSetupEvent`，客户端服务端都会跑，所以是加载即崩、不会带着错误假设进游戏。
+
+这次没有配置项变化，你现有的 `allowEntityRemoval: true` 保持不变即可。改动未提交。
