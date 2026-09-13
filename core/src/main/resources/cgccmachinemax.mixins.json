@@ -5,7 +5,7 @@
   "refmap": "cgccmachinemax.refmap.json",
   "mixins": [
     "entity.MMPartEntityMixin",
-    "entity.projectile.GunProjectileMixin"
+    "entity.GunProjectileMixin",
   ],
   "injectors": {
     "defaultRequire": 1

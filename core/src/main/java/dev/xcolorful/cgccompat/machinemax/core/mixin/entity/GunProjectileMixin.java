@@ -1,4 +1,4 @@
-package dev.xcolorful.cgccompat.machinemax.core.mixin.entity.projectile;
+package dev.xcolorful.cgccompat.machinemax.core.mixin.entity;
 
 import cn.solarmoon.spark_core.physics.PhysicsHelperKt;
 import cn.solarmoon.spark_core.util.SparkMathKt;
