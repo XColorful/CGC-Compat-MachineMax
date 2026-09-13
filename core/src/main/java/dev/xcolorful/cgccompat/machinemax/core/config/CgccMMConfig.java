@@ -28,6 +28,8 @@ public final class CgccMMConfig {
     private static final int DEFAULT_MAX_CONCURRENT_SOUNDS = 8;
     private static final boolean DEFAULT_MODIFY_RENDER_DISTANCE = true;
     private static final int DEFAULT_RENDER_DISTANCE = 20;
+    private static final boolean DEFAULT_FOLLOW_MOB_GRIEFING = true;
+    private static final boolean DEFAULT_FORCE_DISABLE_GRIEFING = false;
 
     /**
      * 渲染距离下限（区块）
@@ -74,6 +76,22 @@ public final class CgccMMConfig {
      */
     public static int renderDistance = DEFAULT_RENDER_DISTANCE;
 
+    /**
+     * 载具破坏方块是否跟随 mobGriefing 游戏规则。
+     * <p>
+     * {@code true}（默认）时 {@code mobGriefing=false} 会拦截载具对方块的破坏，
+     * 方块按不可破坏处理；{@code false} 时不检查游戏规则，保持 MachineMax 原本行为。
+     */
+    public static boolean followMobGriefing = DEFAULT_FOLLOW_MOB_GRIEFING;
+
+    /**
+     * 强制拦截载具对方块的破坏。
+     * <p>
+     * {@code true} 时无视 {@link #followMobGriefing} 与游戏规则，始终拦截；
+     * {@code false}（默认）时是否拦截由 {@link #followMobGriefing} 与 mobGriefing 决定。
+     */
+    public static boolean forceDisableGriefing = DEFAULT_FORCE_DISABLE_GRIEFING;
+
     private CgccMMConfig() {
     }
 
@@ -104,6 +122,8 @@ public final class CgccMMConfig {
 //                case CgccMMConfigTag.MAX_CONCURRENT_SOUNDS -> maxConcurrentSounds = Math.max(0, JsonUtils.readInt(reader));
                 case CgccMMConfigTag.MODIFY_RENDER_DISTANCE -> modifyRenderDistance = JsonUtils.readBoolean(reader);
                 case CgccMMConfigTag.RENDER_DISTANCE -> renderDistance = Math.max(MIN_RENDER_DISTANCE, JsonUtils.readInt(reader));
+                case CgccMMConfigTag.FOLLOW_MOB_GRIEFING -> followMobGriefing = JsonUtils.readBoolean(reader);
+                case CgccMMConfigTag.FORCE_DISABLE_GRIEFING -> forceDisableGriefing = JsonUtils.readBoolean(reader);
                 default -> reader.skipValue();
             }
         }
@@ -127,6 +147,8 @@ public final class CgccMMConfig {
 //                    JsonUtils.writeInt(writer, CgccMMConfigTag.MAX_CONCURRENT_SOUNDS, maxConcurrentSounds);
                     JsonUtils.writeBoolean(writer, CgccMMConfigTag.MODIFY_RENDER_DISTANCE, modifyRenderDistance);
                     JsonUtils.writeInt(writer, CgccMMConfigTag.RENDER_DISTANCE, renderDistance);
+                    JsonUtils.writeBoolean(writer, CgccMMConfigTag.FOLLOW_MOB_GRIEFING, followMobGriefing);
+                    JsonUtils.writeBoolean(writer, CgccMMConfigTag.FORCE_DISABLE_GRIEFING, forceDisableGriefing);
                 }
                 writer.endObject();
             }
