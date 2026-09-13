@@ -23,7 +23,7 @@ public final class CgccMMConfig {
     // --------默认值--------
 
     private static final boolean DEFAULT_ALLOW_ENTITY_REMOVAL = false;
-    private static final boolean DEFAULT_DISCARD_ON_DETACH = false;
+    private static final boolean DEFAULT_DISCARD_ON_DETACH = true;
     private static final boolean DEFAULT_CONCURRENT_SOUND_LIMIT_ENABLED = false;
     private static final int DEFAULT_MAX_CONCURRENT_SOUNDS = 8;
     private static final boolean DEFAULT_MODIFY_RENDER_DISTANCE = true;

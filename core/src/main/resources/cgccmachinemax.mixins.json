@@ -6,7 +6,9 @@
   "mixins": [
     "entity.EntityTypeAccessor",
     "entity.MMPartEntityMixin",
+    "entity.MMPartEntityRemovalMixin",
     "entity.GunProjectileMixin",
+    "vehicle.ObjectManagerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -279,3 +279,60 @@ Compiles. Let me do a final review of the whole change set.
 **风控**：`addSpiltVehicle` 里立刻 `removePart` 属于在分裂流程内再触发一次移除，我加了服务端限定和 `List.copyOf` 防并发，但这条路径我没法实机验证，建议你进游戏测一下打轮胎的表现（是否还会残留、是否有报错/卡顿）。
 
 没有提交，改动都在工作区。
+
+# 
+
+```
+现在实体渲染正常了，我已commit
+目前的代码状态下，打胎还是不会立即清掉脱落的part
+脱落的载具如果从主体上移除掉subPart，是否会引入副作用？是否还需要从脱落的part上读取什么信息来正常运行？如果是这样，就拦截postTick重建，并且要考虑当这个载具距离很远（区块被卸载），重新进入的时候是否会变回到载具上；如果不会变回去的话，假如载具part被拉得很远，是否会导致超远距离持续加载而不被清理？
+
+假设脱离后的part处于未加载区块下，以这个标准来看主part的行为逻辑，如果还保留subPart，就拦截postTick重建，否则就直接移除subPart并discard
+```
+
+# 
+
+Let me verify my architectural assumptions against the actual MachineMax persistence path before answering.
+
+Important finding: `serverHandleSpilt` runs _before_ `ConnectorDetachPayload` is sent, so my `removePart` packets would be sent _ahead_ of the split packet. Let me check the client handlers to confirm the failure mode.
+
+Let me check how the client handles the split packet (threading matters for the ordering fix).
+
+Let me confirm `VehicleCore`'s tick method so I can defer the removal to the next tick (fixing packet order).
+
+Let me verify the remaining API details before writing.
+
+Now I'll implement the fix — defer the removal to `LevelTickEvent.Post` so `PartRemovePayload` is sent _after_ `ConnectorDetachPayload`.
+
+编译通过。先回答你的四个判断，再说我改了什么。
+
+## 分析结论
+
+**1. 从主体移除 subPart 会不会有副作用？**  
+不会有残留引用。`VehicleCore#removePart` 走的是 MachineMax 自己的移除流程：摘子系统 → `partNet.removeNode` → `part.destroy()`（停碰撞效果、销毁连接件、销毁交互箱、移除实体）→ 空载具就 `ObjectManager#removeVehicle` + `saveVehicles`。因为我们移除的是**整个脱离出去的部分**（不是主体载具的一块），没有任何连接件/子系统/部件还引用它。唯一"损失"是它不掉物品 —— 但 MachineMax 原生摧毁也不掉（`MMPartEntity#getDropItem` 返回空、`SubPart#destroy` 里没有 drop），所以和原生行为一致。
+
+**2. 是否还需要从脱落的 part 读信息？**  
+不需要。脱离部分被整体移除，之后没有任何逻辑再依赖它。  
+反过来说，如果只**拦截 `postTick` 重建**：subPart 还在 → 物理刚体还在（隐形但仍会碰撞），而且它会被写进载具存档永久留着。这比移除更糟。
+
+**3. 区块卸载后会不会变回载具上？**  
+不会"变回"，但**只 discard 实体确实会被重建**。原因：`MMPartEntity` 是 `noSave()` 的瞬态实体；真正的持久化载体是 `VehicleCore`/`Part`/`SubPart`。区块卸载时实体随区块卸载，重新加载时 `SubPart#postTick` → `refreshPartEntity()` 把实体建回来。所以必须把 subPart 本身摘掉（`removePart` 会 `isRemoved=true` + 从 partNet/partMap 摘除 + 存档里也没了），重新进也不会回来。
+
+**4. 拉得很远会不会一直加载不被清理？**  
+不会。MachineMax 没有强加载（`updateVehicleChunk` 只是 `hasChunk` 查询，`inLoadedChunk=false` 就不 tick，没有 ticket）。但不清理的话，脱离部分会作为一个独立载具永久留在存档和内存里，你回去还能打它 —— 这就是要修的现象。
+
+**5. 真正没生效的原因（查到的 bug）**  
+`serverHandleSpilt` 是在**构造 `ConnectorDetachPayload` 实参时**被调用的，所以 `addSpiltVehicle` 里就地 `removePart` 发出的 `PartRemovePayload`，**比 `ConnectorDetachPayload` 先发**。客户端先收到移除包，但分裂载具还没创建，`PartRemovePayload#handle` 找不到载具 → 打日志放弃 → 客户端永远保留脱离部件。
+
+我顺带确认了 NeoForge 的 `MainThreadPayloadHandler` 会把整个 handle 包进 `context.enqueueWork`，所以**只要把发送顺序调正，客户端就能正确应用**，不需要在客户端做额外处理。
+
+## 改动
+
+- [DetachedPartDiscard.java](app://localhost/epitaxy/core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/util/DetachedPartDiscard.java)（新增）：分裂载具先入队，延后到本 level 的 `LevelTickEvent.Post` 再 `removePart`。此时 `ConnectorDetachPayload` 已经发出，`PartRemovePayload` 自然排在后面。
+- [ObjectManagerMixin.java](app://localhost/epitaxy/core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/mixin/vehicle/ObjectManagerMixin.java)：挂在 `addSpiltVehicle`（登记）和 `onPostTick`（统一移除）。`addSpiltVehicle` 是"部件刚被撕裂成独立载具"的唯一入口，与造成撕裂的原因无关 —— 符合你说的"不论是否是子弹命中的"。
+- 只在服务端决定移除，客户端跟随服务端下发的移除包，避免两端配置不一致时状态分叉。
+- `discardOnDetach` 默认值改成 **`true`**，这样开箱即生效；不想要就改回 `false`。
+
+服务端移除、客户端通过移除包同步，这条链路是权威的；`removePart` 过程中若又产生新的分裂，会再次入队，下一 tick 继续处理，最终收敛。
+
+改动仍未提交，建议进游戏验证：打轮胎后脱离部件应立即消失，且退出重进不会回来。
