@@ -100,8 +100,8 @@ public final class CgccMMConfig {
             switch (reader.nextName()) {
                 case CgccMMConfigTag.ALLOW_ENTITY_REMOVAL -> entityRemovalAllowed = JsonUtils.readBoolean(reader);
                 case CgccMMConfigTag.DISCARD_ON_DETACH -> discardOnDetach = JsonUtils.readBoolean(reader);
-                case CgccMMConfigTag.CONCURRENT_SOUND_LIMIT_ENABLED -> concurrentSoundLimitEnabled = JsonUtils.readBoolean(reader);
-                case CgccMMConfigTag.MAX_CONCURRENT_SOUNDS -> maxConcurrentSounds = Math.max(0, JsonUtils.readInt(reader));
+//                case CgccMMConfigTag.CONCURRENT_SOUND_LIMIT_ENABLED -> concurrentSoundLimitEnabled = JsonUtils.readBoolean(reader);
+//                case CgccMMConfigTag.MAX_CONCURRENT_SOUNDS -> maxConcurrentSounds = Math.max(0, JsonUtils.readInt(reader));
                 case CgccMMConfigTag.MODIFY_RENDER_DISTANCE -> modifyRenderDistance = JsonUtils.readBoolean(reader);
                 case CgccMMConfigTag.RENDER_DISTANCE -> renderDistance = Math.max(MIN_RENDER_DISTANCE, JsonUtils.readInt(reader));
                 default -> reader.skipValue();
@@ -123,8 +123,8 @@ public final class CgccMMConfig {
                 writer.beginObject(); {
                     JsonUtils.writeBoolean(writer, CgccMMConfigTag.ALLOW_ENTITY_REMOVAL, entityRemovalAllowed);
                     JsonUtils.writeBoolean(writer, CgccMMConfigTag.DISCARD_ON_DETACH, discardOnDetach);
-                    JsonUtils.writeBoolean(writer, CgccMMConfigTag.CONCURRENT_SOUND_LIMIT_ENABLED, concurrentSoundLimitEnabled);
-                    JsonUtils.writeInt(writer, CgccMMConfigTag.MAX_CONCURRENT_SOUNDS, maxConcurrentSounds);
+//                    JsonUtils.writeBoolean(writer, CgccMMConfigTag.CONCURRENT_SOUND_LIMIT_ENABLED, concurrentSoundLimitEnabled);
+//                    JsonUtils.writeInt(writer, CgccMMConfigTag.MAX_CONCURRENT_SOUNDS, maxConcurrentSounds);
                     JsonUtils.writeBoolean(writer, CgccMMConfigTag.MODIFY_RENDER_DISTANCE, modifyRenderDistance);
                     JsonUtils.writeInt(writer, CgccMMConfigTag.RENDER_DISTANCE, renderDistance);
                 }
