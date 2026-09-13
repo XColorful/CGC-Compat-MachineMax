@@ -8,7 +8,8 @@
     "entity.MMPartEntityMixin",
     "entity.MMPartEntityRemovalMixin",
     "entity.GunProjectileMixin",
-    "vehicle.ObjectManagerMixin"
+    "vehicle.ObjectManagerMixin",
+    "vehicle.CollisionHandlerMixin"
   ],
   "injectors": {
     "defaultRequire": 1
