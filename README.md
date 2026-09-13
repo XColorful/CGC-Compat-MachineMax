@@ -67,7 +67,7 @@ When this mod is installed, the following features take effect automatically:
 - Fixes the conflict between MachineMax camera adjustments and gun recoil
 
 The following options can be configured in `./config/cgccmachinemax.json`:
-- allowEntityRemoval: Whether vehicles can be removed using /kill and other methods
+- allowEntityRemoval: Whether vehicles can be removed using _/kill_ and other methods
 - discardOnDetach: Whether vehicle parts are immediately discarded when they detach
 - modifyRenderDistance: Whether to modify the vehicle render distance (requires server-side configuration)
 - renderDistance: Vehicle render distance (in chunks)
