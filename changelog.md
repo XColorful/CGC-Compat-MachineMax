@@ -1,6 +1,6 @@
 ### 0.0.x
 
-#### 0.0.13
+#### 0.0.12.1
 Add `./config/cgccmachinemax.json`:
 - allowEntityRemoval: Whether vehicles can be removed using /kill and other methods
 - discardOnDetach: Whether vehicle parts are immediately discarded when they detach
