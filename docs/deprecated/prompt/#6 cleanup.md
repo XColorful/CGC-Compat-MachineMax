@@ -131,3 +131,49 @@ All changes verified. Let me record the cross-repo context that made this cleanu
 - **未提交**：删除已由 `git rm` 暂存，其余编辑未暂存。当前分支 `cleanup`。
 - **`changelog.md` 未动**（`0.0.12.1` 那条是历史记录，仍准确）；如需记录本次移除和版本号，你来定。
 - 未实机验证。建议进游戏确认远处载具由 MachineMax 自身渲染正常、且无重叠。
+
+# 
+
+```
+还有一个需要调查的：
+- MachineMax的配置项似乎有配置脱落的part 每tick扣血，检查下是否存在该配置，如果有且可以通过配置极大值来实现掉落后秒没的话，那么“脱落后立即移除”也可以完全清理掉。
+```
+
+# 
+
+Good question — let me search the MachineMax fork for any detached-part HP-decay mechanic and re-read the config spec.
+
+Let me look at the detach/split flow and search content packs/schemas for any detached-part decay field.
+
+Let me trace the detach/split code and all damage sources to see if anything decays detached parts.
+
+Let me check the split-vehicle lifecycle, HP behavior, and git history for any detached-part decay feature.
+
+调查完成。结论：**不存在这样的配置**，`discardOnDetach` 不能用配置替代。
+
+## 证据
+
+**1. MachineMax 全部配置项已枚举**（3 个 ModConfigSpec，[`MachineMax.java:59-69`](D:/Github/Machine-Max/src/main/java/io/github/sweetzonzi/machine_max/MachineMax.java) 注册）：
+
+- [`MMServerConfig.java`](D:/Github/Machine-Max/src/main/java/io/github/sweetzonzi/machine_max/common/MMServerConfig.java)：`should_destroy_blocks`、`projectile_destroy_blocks`、`ignore_assembly_tag_requirements`、`subpart_destroy_ticks_per_durability`(10)、`subpart_destroy_min_ticks`(200)、`subpart_destroy_advance_ticks_per_damage`(20)
+- `MMClientConfig` / `MMCommonConfig`：视觉、操控、欢迎页、内容包，无相关项
+
+没有任何一项涉及"脱落部件扣血"。
+
+**2. 唯一的"随时间消失"机制是销毁倒计时，且只对已摧毁（耐久=0）的部件生效** —— [`DestroyableObject.java`](D:/Github/Machine-Max/src/main/java/io/github/sweetzonzi/machine_max/common/mech/DestroyableObject.java)：
+
+- `postTick` 里只有 `if (isDestroyed()) tickDestroyTimer(1)`，计时归零才 `destroy()`
+- 计时初值 = `max(最大耐久 × subpart_destroy_ticks_per_durability, subpart_destroy_min_ticks)`（[:133](D:/Github/Machine-Max/src/main/java/io/github/sweetzonzi/machine_max/common/mech/DestroyableObject.java)）
+
+所以你想到的"配置极大值"实际是**极小值**：把 `subpart_destroy_min_ticks=0` + `subpart_destroy_ticks_per_durability=0`，已摧毁部件会在同 tick 消失。但这只对**耐久耗尽**的部件生效。
+
+**3. 脱落本身不造成耐久衰减。** 分裂走 [`VehicleCore.serverHandleSpilt`](D:/Github/Machine-Max/src/main/java/io/github/sweetzonzi/machine_max/common/mech/vehicle/VehicleCore.java) → 只调 `distributeSplitHp`，仅重算 **VehicleCore 组装体血量**（`setHp`），完全不碰 Part/SubPart 耐久。全部 `setDurability` 调用点只有：受击、维修、读档/装配。
+
+**4. 脱落与摧毁是两条独立路径。** [`SubPart.java:573-578`](D:/Github/Machine-Max/src/main/java/io/github/sweetzonzi/machine_max/common/mech/vehicle/SubPart.java) 里同一次命中会分头触发 `distributeDamageImpactToConnectors`（断连接件→脱落）和 `accumulateDamage`（扣耐久）。连接件先断时，**部件是"活着"脱落的（耐久 > 0）**，不受任何销毁倒计时约束，会作为独立载具永久留存 —— 这正是 prompt #4 里"打中部位会脱落"的场景。
+
+## 结论
+
+- 已摧毁部件脱落后：MachineMax 自己的倒计时会清掉它（可用上述配置加速到瞬没）。
+- **存活部件脱落：MachineMax 没有任何衰减或清理机制**，`discardOnDetach` 是唯一手段。
+
+因此 `discardOnDetach` 不能清理 —— 除非你确认只在意"残骸"（已摧毁部件），那才可以只靠 MachineMax 配置。要不要动，你定；我没有改任何代码。
