@@ -30,7 +30,7 @@
 - discardOnDetach：载具部件脱离后是否立即清除
 - modifyRenderDistance：是否修改载具渲染距离（需要服务端配置）
 - renderDistance：载具渲染距离（区块）
-- modifyVehicleSoundDistance：是否修改载具声音距离（需要服务端配置)
+- modifyVehicleSoundDistance：是否修改载具声音距离（需要服务端配置）
 - vehicleSoundDistance：载具声音距离（区块）
 
 ## 内容披露
