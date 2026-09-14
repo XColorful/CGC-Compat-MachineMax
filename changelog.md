@@ -1,5 +1,15 @@
 ### 0.0.x
 
+#### 0.0.12.2
+- Fix crash caused by vehicle removal
+- Fix vehicle seat occupancy check
+- Fix vehicle sounds playing beyond their range
+
+Update `./config/cgccmachinemax.json`:
+- Remove `followMobGriefing`, `forceDisableGriefing`
+- modifyVehicleSoundDistance: Whether to modify the vehicle sound distance (requires server-side configuration)
+- vehicleSoundDistance: Vehicle sound distance (in chunks)
+
 #### 0.0.12.1
 Add `./config/cgccmachinemax.json`:
 - allowEntityRemoval: Whether vehicles can be removed using /kill and other methods
