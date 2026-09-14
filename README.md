@@ -30,8 +30,6 @@
 - discardOnDetach：载具部件脱离后是否立即清除
 - modifyRenderDistance：是否修改载具渲染距离（需要服务端配置）
 - renderDistance：载具渲染距离（区块）
-- followMobGriefing：载具破坏方块是否遵循原版生物破坏规则
-- forceDisableGriefing：是否强制禁止载具破坏方块
 
 ## 内容披露
 
@@ -71,8 +69,6 @@ The following options can be configured in `./config/cgccmachinemax.json`:
 - discardOnDetach: Whether vehicle parts are immediately discarded when they detach
 - modifyRenderDistance: Whether to modify the vehicle render distance (requires server-side configuration)
 - renderDistance: Vehicle render distance (in chunks)
-- followMobGriefing: Whether vehicle block breaking follows the vanilla mob griefing rule
-- forceDisableGriefing: Whether to forcibly prevent vehicles from breaking blocks
 
 ## Content disclosures
 
