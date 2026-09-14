@@ -28,6 +28,8 @@
 在`./config/cgccmachinemax.json`可配置以下选项：
 - allowEntityRemoval：是否允许 _/kill_ 等方式移除载具
 - discardOnDetach：载具部件脱离后是否立即清除
+- modifyRenderDistance：是否修改载具渲染距离（需要服务端配置）
+- renderDistance：载具渲染距离（区块）
 
 ## 内容披露
 
@@ -65,6 +67,8 @@ When this mod is installed, the following features take effect automatically:
 The following options can be configured in `./config/cgccmachinemax.json`:
 - allowEntityRemoval: Whether vehicles can be removed using _/kill_ and other methods
 - discardOnDetach: Whether vehicle parts are immediately discarded when they detach
+- modifyRenderDistance: Whether to modify the vehicle render distance (requires server-side configuration)
+- renderDistance: Vehicle render distance (in chunks)
 
 ## Content disclosures
 

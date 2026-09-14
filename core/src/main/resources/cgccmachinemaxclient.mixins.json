@@ -1,0 +1,12 @@
+{
+  "package": "dev.xcolorful.cgccompat.machinemax.client.mixin",
+  "minVersion": "0.8",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "cgccmachinemax.refmap.json",
+  "client": [
+    "renderer.PartEntityRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
