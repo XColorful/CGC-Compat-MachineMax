@@ -28,11 +28,18 @@ public final class CgccMMConfig {
     private static final int DEFAULT_MAX_CONCURRENT_SOUNDS = 8;
     private static final boolean DEFAULT_MODIFY_RENDER_DISTANCE = true;
     private static final int DEFAULT_RENDER_DISTANCE = 20;
+    private static final boolean DEFAULT_MODIFY_VEHICLE_SOUND_DISTANCE = true;
+    private static final int DEFAULT_VEHICLE_SOUND_DISTANCE = 20;
 
     /**
      * 渲染距离下限（区块）
      */
     private static final int MIN_RENDER_DISTANCE = 1;
+
+    /**
+     * 载具音效传播距离下限（区块）
+     */
+    private static final int MIN_VEHICLE_SOUND_DISTANCE = 1;
 
     /**
      * 是否允许 {@code kill @e} / {@code Entity#discard()} 等主动手段移除部件实体。
@@ -74,6 +81,22 @@ public final class CgccMMConfig {
      */
     public static int renderDistance = DEFAULT_RENDER_DISTANCE;
 
+    /**
+     * 是否修改载具音效的传播距离。
+     * <p>
+     * MachineMax 的引擎/电机工作音、轮胎摩擦音等经 SparkCore 的传播音效系统（{@code SpreadingSoundInstance}）
+     * 播放，传播距离取音效自己声明的 range（内容包里多为 64 格），远小于本模组放宽后的可见范围。
+     * 置 {@code true} 时按 {@link #vehicleSoundDistance} 统一这些音效的距离，衰减方式不变。
+     * <p>
+     * 碰撞、命中、撕裂、破坏与拆装工具音不受影响，保持各自声明的短距离。
+     */
+    public static boolean modifyVehicleSoundDistance = DEFAULT_MODIFY_VEHICLE_SOUND_DISTANCE;
+
+    /**
+     * 载具音效的传播距离，单位为区块
+     */
+    public static int vehicleSoundDistance = DEFAULT_VEHICLE_SOUND_DISTANCE;
+
     private CgccMMConfig() {
     }
 
@@ -94,6 +117,20 @@ public final class CgccMMConfig {
         _write(configFile);
     }
 
+    /**
+     * 用服务端下发的值覆盖载具音效配置（客户端侧，仅内存，不写回本地文件）。
+     * <p>
+     * 载具音效距离在客户端计算，客户端本地文件既可能没改也可能被改坏，
+     * 因此以服务端的值为准，保证同一服务器内所有客户端一致。
+     *
+     * @param modify   服务端是否接管载具音效距离
+     * @param distance 载具音效传播距离（区块）
+     */
+    public static void applyVehicleSoundDistanceFromServer(boolean modify, int distance) {
+        modifyVehicleSoundDistance = modify;
+        vehicleSoundDistance = Math.max(MIN_VEHICLE_SOUND_DISTANCE, distance);
+    }
+
     private static void _read(JsonReader reader) throws IOException {
         reader.beginObject();
         while (reader.hasNext()) {
@@ -104,6 +141,8 @@ public final class CgccMMConfig {
 //                case CgccMMConfigTag.MAX_CONCURRENT_SOUNDS -> maxConcurrentSounds = Math.max(0, JsonUtils.readInt(reader));
                 case CgccMMConfigTag.MODIFY_RENDER_DISTANCE -> modifyRenderDistance = JsonUtils.readBoolean(reader);
                 case CgccMMConfigTag.RENDER_DISTANCE -> renderDistance = Math.max(MIN_RENDER_DISTANCE, JsonUtils.readInt(reader));
+                case CgccMMConfigTag.MODIFY_VEHICLE_SOUND_DISTANCE -> modifyVehicleSoundDistance = JsonUtils.readBoolean(reader);
+                case CgccMMConfigTag.VEHICLE_SOUND_DISTANCE -> vehicleSoundDistance = Math.max(MIN_VEHICLE_SOUND_DISTANCE, JsonUtils.readInt(reader));
                 default -> reader.skipValue();
             }
         }
@@ -127,6 +166,8 @@ public final class CgccMMConfig {
 //                    JsonUtils.writeInt(writer, CgccMMConfigTag.MAX_CONCURRENT_SOUNDS, maxConcurrentSounds);
                     JsonUtils.writeBoolean(writer, CgccMMConfigTag.MODIFY_RENDER_DISTANCE, modifyRenderDistance);
                     JsonUtils.writeInt(writer, CgccMMConfigTag.RENDER_DISTANCE, renderDistance);
+                    JsonUtils.writeBoolean(writer, CgccMMConfigTag.MODIFY_VEHICLE_SOUND_DISTANCE, modifyVehicleSoundDistance);
+                    JsonUtils.writeInt(writer, CgccMMConfigTag.VEHICLE_SOUND_DISTANCE, vehicleSoundDistance);
                 }
                 writer.endObject();
             }

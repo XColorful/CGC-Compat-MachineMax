@@ -7,6 +7,7 @@
     "renderer.PartEntityRendererMixin",
     "sound.CarControllerSubsystemSoundMixin",
     "sound.GearboxSubsystemSoundMixin",
+    "sound.SpreadingSoundInstanceRangeMixin",
     "sound.WheelDriverSubsystemSoundMixin"
   ],
   "injectors": {

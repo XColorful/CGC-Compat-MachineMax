@@ -627,3 +627,295 @@ Diagnostics are out and the rebuilt jar is clean. Updating project memory to ref
 - 另外 `docs/deprecated/prompt/#7 multiplayer-fix.md` 在工作区里是 modified 状态（前几轮追加的对话记录），我没动它——需要的话我可以把本轮结论也追加进去，或者把这个改动还原。
 
 要我提交音效这部分吗？
+
+# 
+
+```
+我已经提交刚才的代码状态，当前的修复方案是否是客户端本地过滤?是否能改成服务端就判定距离然后拦截发送，而不要等到客户端才过滤?
+```
+
+# 
+
+好问题——让我先确认这几处音效的触发侧，再回答能否挪到服务端。
+
+Let me verify what the server actually broadcasts for vehicles, and check the render-distance mixin.
+
+核完了字节码，结论明确。先直接回答：**是客户端本地过滤；而且这套音效不存在可以「发送前拦截」的服务端声音包**。
+
+## 为什么服务端没有可拦截的对象
+
+| 音效 | 实际触发点（旧版 jar 字节码） |
+|---|---|
+| `gearbox.clutch_in/out`、`up/down.light` | 全在 `GearboxSubsystem` 的 `lambda$onSyncedDataUpdated$1..4` 里 —— **`onSyncedDataUpdated` 只在客户端被调用** |
+| `car_controller.handbrake_on/off` | `CarControllerSubsystem.onTick` 内直接调 `Level.playLocalSound` |
+| `wheel_driver.brake_on/off` | `WheelDriverSubsystem.onTick` 内同上 |
+
+而 `Level.playLocalSound(DDD…)` 在 `Level.java:524` 是**空方法体**，只有 `ClientLevel` 覆盖它 —— 服务端调它等于什么都没做。所以这五个声音从头到尾没有服务端参与，也就没有「服务端发出去的声音包」可拦。
+
+服务端真正发的只有**载具状态**，而且是无距离过滤的全维度广播：
+
+```
+AbstractSubsystem.syncToClient():
+    getSynchedData().packDirty()  →  SubsystemSyncPayload(subPartId, name, dirty)
+    PacketDistributor.sendToPlayersInDimension(serverLevel, payload)   // 整个类里 0 处距离判断
+```
+
+B 的客户端就是收到这条包 → 应用到本地副本 → 触发 `onSyncedDataUpdated` → **在本地**播了那个声音。距离从来没进入这条链路。
+
+## 服务端方案存在，但不是「只拦声音」
+
+技术上可行：mixin `AbstractSubsystem#syncToClient`（以及 `VehicleCore#syncStatusToClient`），改成只发给载具附近 N 格内的玩家。但代价不对等：
+
+- **它拦的是状态，不是声音**。被拦掉的玩家拿不到挡位/离合/刹车/状态同步 → 车里轮子不转、挡位相关的表现停在旧值，而按本兼容模组的 `modifyRenderDistance`（默认 20 区块可见）这些玩家**本来是在看着这台车的**。
+- **顺带也会杀掉引擎音**：引擎音是各客户端按引擎子系统状态自己建的，状态不发了声音自然也没了 —— 这次是对的，但超出了「过滤咔哒声」的范围。
+- 一旦客户端状态不同步，本地物理副本还会各自漂移（MM 就是这么设计的：状态全量广播、各端自跑一份）。
+
+换句话说，服务端只能决定「**谁收得到这台车**」，决定不了「**多远还能听见**」——距离衰减在 Minecraft 音频里本质是客户端计算，因为听者在客户端。MM 自己那套正确做法（SparkCore `SpreadingSoundInstance`，引擎音用的）同样是**每 tick 在客户端重算音量**，只是它把 `maxRange` 声明清楚了，所以 B 那边自动静音。
+
+## 我的建议
+
+保留客户端门限。它只做一次距离比较，音效实例根本不会被构造，没有额外开销，也不改变任何状态同步语义。真要把这段从兼容模组里去掉，正确的位置是上游 MachineMax：让这三个子系统也走 SparkCore 的距离管理音效（照 `EngineSubsystem` 那样发），那时这个 mixin 可以直接删掉——但那是改 MM 本体，不是兼容层能替代的。
+
+如果你仍想验证服务端方案的观感差异，我可以在 `CgccMMConfig` 后面加一个默认关闭的开关，mixin `syncToClient` 做半径过滤，方便你实测对比——要的话我就动手。
+
+# 
+
+```
+那就保留这个客户端侧计算距离的方案。
+
+我现在需要增加两个兼容模组配置项，一个bool控制是否启用，一个int控制载具声音距离
+- 根据之前的对话，好像载具声音是传播64距离，这个对于一些小游戏肯定是太近了，尤其是我还添加配置把渲染距离搞到20
+- 不仅要能控制载具声音距离，比如设置声音距离到20，那么在最远320格处应该声音比较小，近距离时声音大（保留音量衰减），并且还要不干扰一些固定传播距离的声音，比如之前修复的B听到的器件声，这种非“竞技游戏中的信息性质”的声音就保留原本的短的传播距离即可。
+
+现在开始完成新增的配置项。
+```
+
+# 
+
+这个需求要动 SparkCore 的距离判定入口，我先把相关 jar 和调用路径摸清。
+
+SparkCore is a compile dep. Inspecting its sound classes.
+
+Now checking how SparkCore consumes `maxRange`, and which namespaces MM's vehicle sounds use.
+
+设计上有三个点需要你定，其余我已从字节码核实：
+
+- `SpreadingSoundInstance` 的 `maxRange` 就是在两个构造器里 `soundEvent.getRange(1.0f)` 赋的（字节码 offset 113/117，接收者是 MM 传入的那个 SoundEvent）；
+- 音量公式是 `volume × (1 − min(dist/maxRange, 1))²`，所以改 `maxRange` 天然保留衰减、在边界处归零；
+- 官方内容包实际范围分布：**72 处 64**（机械工作音）、**6 处 48**（玻璃/木头材质命中）、**5 处 16**（轮刹，走 `playLocalSound` 即已修复的那条）、**1 处 32**（default_glass）；工具音（撬棍/焊枪等 `item.*`）由代码硬编码 `createFixedRangeEvent(..., 32.0f)`。
+
+用户的答复里「碰撞/命中保持原样」这一条需要我确认轮胎摩擦音在数据里的声明方式，先看材质配置。
+
+我需要看清 `BasicSubsystem` 是怎么分别播「工作音」和「启停/破坏音」的，这决定了能不能精确排除破坏音。
+
+在动手前还要确认一件事：SparkCore 是否用 AABB（而非 maxRange）提前拦掉远处的音源实例——否则只改 maxRange 没用。
+
+设计确认可行：`maxRange` 同时决定「波前能传多远」（`tick()` 里 `spreadDistance > maxRange` 就丢弃声源点）和音量衰减，所以改它正好扩大了可听半径。开始实现。
+
+配置项与 mixin 已实现、编译通过并打包。
+
+## 改了什么
+
+**配置（`CgccMMConfig` + `CgccMMConfigTag`，沿用 `modifyRenderDistance`/`renderDistance` 的命名与读写方式）**
+
+| 键 | 类型 | 默认 | 含义 |
+|---|---|---|---|
+| `modifyVehicleSoundDistance` | bool | `true` | 是否接管载具音效传播距离 |
+| `vehicleSoundDistance` | int | `20` | 载具音效传播距离，**单位为区块**（下限 1） |
+
+两个默认值都与你现有的 `renderDistance: 20` 对齐，所以开箱即是「引擎声传满可见范围」。配置文件在客户端实例的 `config/cgccompatmachinemax.json`……更正：`config/cgccmachinemax.json`（`CgccMachineMax.FILE_NAME`），客户端/服务端各自加载，音效这部分只读客户端的值。
+
+**新增 [SpreadingSoundInstanceRangeMixin.java](core/src/main/java/dev/xcolorful/cgccompat/machinemax/client/mixin/sound/SpreadingSoundInstanceRangeMixin.java)**，已注册进 `cgccmachinemaxclient.mixins.json`。
+
+## 为什么钉在 `SpreadingSoundInstance` 上
+
+从 SparkCore 1.0.1023 字节码核实：`maxRange` 在构造时由 `soundEvent.getRange(1.0f)` 赋值（两个构造器各一处，接收者就是 MM 传入的那个 SoundEvent），而它同时决定两件事——
+
+- `spark_core$calculateVolume` 的音量：`volume × (1 − min(dist/maxRange, 1))²`；
+- `tick()` 里声源点的存活：`spreadDistance > maxRange` 就丢弃该点（`spreadDistance` 按声速推进，`hasReachedListener` 要求 `dist ≤ spreadDistance`）。
+
+所以它就是**可听半径本身**，改它既扩大半径又保留衰减曲线，近处音量不变。这也是为什么 B 在 3600 格外时客户端连 `SoundEngine.play` 都没进过（波前根本没推到那儿）。
+
+只重定向这一处调用，`SoundEvent.getRange` 本身不动 —— 因此 `LocalSoundRange`（变速箱/手刹/轮刹那批 16 格音效）完全不受影响，两条机制彼此独立。
+
+## 缩放范围（按你的答复）
+
+**放大到 `vehicleSoundDistance`**：`machine_max:subsystem.*`（引擎/电机的启停音 + 各转速工作音）与 `machine_max:part.collision.terrain.tire_*`（轮胎摩擦、打滑）。
+
+**保持原距离**：`part.collision.terrain.hard_*`（碰撞）、`part.torn_apart`（撕裂）、`hit_box.*`（命中）、`item.*`（撬棍/焊枪/喷漆等拆装工具）——这几类在数据里本来就是 64/48/32，现在原样保留；车辆附近的玩家照常能听到。
+
+有一处我替你做了判断，请确认：**子系统破坏音也排除了**（官方包里是 `machine_max:subsystem.baisc.glass.break`，声明 32 格，比如玻璃件被打碎）。它是 `subsystem.*` 但不是"载具运转"信息，按你说的"听不到那么远的碎裂声"保留原距离。实现上是一句 `!path.endsWith(".break")`——这是个命名约定判断，如果你的内容包把破坏音起成别的名字，它会漏进来；不想要这条排除、或想换成别的规则，说一声我改。
+
+另外提一句：配置里原本就有 `concurrentSoundLimitEnabled` / `maxConcurrentSounds` 两个字段，注释写着"当前未实现"，读写分支是注释掉的。我没动它们。
+
+## 我没能验证的部分
+
+**运行时行为我无法在此环境实测**——客户端 mixin 要在真实客户端里才加载。请两台客户端换上 [cgccmachinemax-0.0.12.1-neoforge-1.21.1.jar](neoforge-compat/build/libs/cgccmachinemax-0.0.12.1-neoforge-1.21.1.jar)（00:49），A 开远一点，在 B 的客户端日志里确认：
+
+1. `Mixing sound.SpreadingSoundInstanceRangeMixin ... into cn.solarmoon.spark_core.sound.SpreadingSoundInstance` —— 必须出现；
+2. `Mixin apply for mod cgccmachinemax failed` —— 必须为 0 条（这条注入失败在本项目只打 WARN 不崩，务必搜一次）；
+3. 听感：A 驾驶时 B 在 300 格左右应能听到引擎与轮胎摩擦，且**随距离递减**、到 `vehicleSoundDistance × 16` 格处归零；B 靠近到 64 格内的音量应与改动前一致。
+
+改动未提交，等你 review。
+
+# 
+
+```
+检查一下，如果只有服务端设置了，客户端使用最新的jar是否仍然能正确计算距离，而不是使用本地的配置文件（不权威)？
+```
+
+# 
+
+先核实这一点。
+
+核实完了，**结论是：现在客户端完全不会用服务端的值。**
+
+## 检查结果
+
+- 音效距离是在客户端读的：`SpreadingSoundInstanceRangeMixin`（client mixin）里直接读 `CgccMMConfig.vehicleSoundDistance`。
+- `CgccMMConfig.load(...)` 在 [CgccMachineMax.java:37](core/src/main/java/dev/xcolorful/cgccompat/machinemax/CgccMachineMax.java:37) 用 `FMLPaths.CONFIGDIR.get()` 调用 —— 每个端只读**自己那边的** config 目录。
+- 全项目没有任何配置同步：唯一的网络代码是三个 `core/mixin/network/*` mixin 在改 MachineMax 自己的广播，兼容模组自己没有 payload 注册（没有 `PayloadRegistrar` / `RegisterPayloadHandlersInterface`）。
+
+所以只设服务端时：客户端读自己的 `config/cgccmachinemax.json`；该键不存在时按默认值补写 `true` / `20`。**服务端把 `vehicleSoundDistance` 改成 40，客户端的音效仍旧按 20 播放。**
+
+这里有个容易误判的点：你现在的默认值和你的预期恰好一致（两边默认都是 20），所以"看起来是对的"是巧合，不是同步生效。
+
+## 对照：`renderDistance` 为什么不一样
+
+现有的 `renderDistance` 是**混合**的：`ModEntities.modifyVehicleRenderDistance()` 在 common setup 里跑——在专用服务端上改的是服务端那份 `EntityType.clientTrackingRange`（所以同步范围确实由服务端决定 ✔），而客户端的 `PartEntityRendererMixin` 只用自己的值决定渲染裁剪。也就是说"服务端配置管服务端行为"在这个项目里已有先例，客户端行为（渲染裁剪、音效）一直是本地值。
+
+要做成服务端权威，需要新增一条服务端→客户端的同步：
+
+## 方案（若你确认要做）
+
+1. 新增一个 `CustomPacketPayload`，两个字段就是 `modifyVehicleSoundDistance` + `vehicleSoundDistance`；
+2. 在 `neoforge-compat` 用 `RegisterPayloadHandlersEvent` 注册 `playToClient`（标 `optional()`，避免没装兼容的客户端被踢）；
+3. 服务端在**配置阶段**（NeoForge 的 `RegisterConfigurationTasksEvent`）下发，玩家进入世界前就生效，没有"进服瞬间按默认值播"的竞态；
+4. 客户端收到后覆盖内存里的两个字段（**不写回本地文件**，保留文件作为单机/LAN 与默认值的记录）；
+5. 客户端 mixin 不变，只是读到的值来自服务端。
+
+语义：连了带兼容的服务端 → 服务端说了算（这也符合"竞技性信息音效要各端一致"）；单机/连没装兼容的服务端 → 用本地值。
+
+要我按这个做吗？如果你更希望保留玩家自选（比如性能考虑），那就维持现状，我在配置注释里写清"仅对本客户端生效"。
+
+# 
+
+```
+需要，防止客户端没改或者乱改，需要发包通知客户端设置内存值
+```
+
+# 
+
+需要服务端权威的同步。先把项目的跨平台注册约定摸清——它可能已经有网络/事件注册的封装。
+
+这是我需要判断的关键点：CGC 的 `NetworkHandler.registerMessages()` 是写死的列表，`adapter` 是 private，**没有给第三方模组留注册入口**。先看 MachineMax 自己是怎么注册 payload 的，作为模板。
+
+CGC 没给第三方留注册入口，所以要走 NeoForge 原生注册。先读 NeoForge 源码确认 API 细节。
+
+# 
+
+```
+CGC的NetworkHandler没给接口，但是其使用的interface的实现(在neoforge包下）是直接能参考的
+```
+
+# 
+
+CGC 的 `registerMessage` 用的是 `event.registrar(modId)`——**非 optional**，而 NeoForge 的规定是「连接中缺少任何非 optional 的 payload 就拒绝连接」。也就是说走 CGC 的 registrar 注册我们自己的包，会让"装了兼容的服务端 + 没装兼容的客户端"直接连不上。先确认几个 API。
+
+`bus` 在 1.21.1 已废弃、由事件类型自动判定（默认 GAME，但 mod bus 事件也会被正确挂上）——所以裸 `@EventBusSubscriber` 两种事件都能收到。现在实现。
+
+服务端权威的同步做完了，编译通过。关于你提的"参考 NeoNetworkAdapter 的实现"——我正是照它的写法做的，但**没有**走 CGC 的 `registerMessage`，原因在下面。
+
+## 新增/改动
+
+| 文件 | 作用 |
+|---|---|
+| [VehicleSoundConfigPayload.java](core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/network/VehicleSoundConfigPayload.java) | S2C 包，携带 `modifyVehicleSoundDistance` + `vehicleSoundDistance` |
+| [NeoVehicleSoundConfigSync.java](neoforge-compat/src/main/java/dev/xcolorful/cgccompat/machinemax/neoforge/init/NeoVehicleSoundConfigSync.java) | 注册 payload（mod bus）+ 玩家登录时下发（game bus） |
+| [CgccMMConfig.java](core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/config/CgccMMConfig.java) | 新增 `applyVehicleSoundDistanceFromServer(modify, distance)`：覆盖内存值，带下限钳制 |
+| [SpreadingSoundInstanceRangeMixin.java](core/src/main/java/dev/xcolorful/cgccompat/machinemax/client/mixin/sound/SpreadingSoundInstanceRangeMixin.java) | 不变——它读的还是 `CgccMMConfig`，只是值现在来自服务端 |
+
+流程：客户端连上就能收到一次，值覆盖内存；本地 `config/cgccmachinemax.json` 不写回（所以客户端那边的值完全不参与，改坏也没用）。
+
+## 为什么没走 CGC 的 `registerMessage`
+
+`NeoNetworkAdapter.INSTANCE.registerMessage(...)` 确实是可以直接调的（public static，`IMessage` 也是 public API），但它的 registrar 是：
+
+```java
+final PayloadRegistrar registrar = event.registrar(INSTANCE.modId);   // 没有 .optional()
+```
+
+而 NeoForge 的规则是（`PayloadRegistrar#optional` 的注释原文）：
+
+> If any non-optional payloads are missing during a connection attempt, the connection will fail.
+
+也就是说走这条路，**装了兼容的服务端会让没装兼容的客户端直接连不上**——对一个本该可选的兼容模组来说这个代价太大。另外这种方式包的 id 会落在 `customgun:` 命名空间、版本号用 CGC 的，而且要求我这个包在 CGC 那个 `RegisterPayloadHandlersEvent` 处理器跑之前排进队列，多一层时序依赖。
+
+所以我是**照它的实现结构**（record + `TYPE` + `STREAM_CODEC` + `RegisterPayloadHandlersEvent` + `PayloadRegistrar`，与 MM 的 `MMPayloadRegistry`/`ControlPreferencePayload` 同构）注册在兼容模组自己的命名空间下，并且用了 `.optional()`：
+
+- 包 id：`cgccmachinemax:vehicle_sound_config`
+- `optional()` → 客户端没装兼容也不会被拒绝连接
+- 下发前再查一次 `player.connection.hasChannel(TYPE)`，对方没这个通道就不发，不会报错
+
+**如果你希望这类同步统一走 CGC 的网络层**，那需要 CGC 侧开个口子：给 `NetworkHandler` 一个第三方注册入口、并允许按包声明 optional。那是改 CGC 本体，你说一声我去做。
+
+## 新增的平台 API（按你的规矩报备）
+
+`RegisterPayloadHandlersEvent` / `PayloadRegistrar#optional()` / `PacketDistributor.sendToPlayer` / `PlayerEvent.PlayerLoggedInEvent` / `ICommonPacketListener#hasChannel`。这些都是 NeoForge 标准 API，且 MM 与 CGC 都在用同款，我认为不需要额外兼容包装——需要的话我可以包一层。
+
+顺带一个核实结果：`@EventBusSubscriber` 的 `bus` 属性在 1.21.1 已废弃，总线由事件类型自动判定（默认值是 GAME，但 mod bus 事件照样能挂上，MM 就是这么用的），所以我把注册和下发放在同一个类里。
+
+## 需要你实测的验收
+
+这次只改服务端就有意义了，验证方法正好就是你要的场景：
+
+1. **只改服务端**的 `config/cgccmachinemax.json`，把 `vehicleSoundDistance` 设成 `40`（640 格），重启。
+2. 客户端**不动本地文件**（或干脆删掉它），连上后测听感：应该在 300+ 格就能听到引擎/轮胎摩擦，且在 640 格左右归零。
+3. 客户端日志里搜 `cgccmachinemax`，应当**没有** payload 相关报错；若有 `Failed to send payload`／`unregistered payload` 之类，把它发我。
+
+产物：[cgccmachinemax-0.0.12.1-neoforge-1.21.1.jar](neoforge-compat/build/libs/cgccmachinemax-0.0.12.1-neoforge-1.21.1.jar)（00:59）。改动未提交。
+
+# 
+
+```
+我在README里本来就写了要双端都安装，且需要保证客户端有应用效果，所以这个message也是利用来防止客户端不一致的手段，给我修改
+```
+
+# 
+
+明白——既然是强制双端安装，这个包就用作一致性校验。先确认 README 的措辞和 NeoForge 非 optional 包的实际拒绝行为。
+
+README 的两端安装要求确认了（第 12/51 行），NeoForge 的非 optional 行为也确认了：协商失败时会向客户端发 `ModdedNetworkSetupFailedPayload`（列出缺失通道）并以 `multiplayer.disconnect.incompatible` 断开。开始改。
+
+改完了。
+
+## 改动
+
+只改了一个文件：[NeoVehicleSoundConfigSync.java](neoforge-compat/src/main/java/dev/xcolorful/cgccompat/machinemax/neoforge/init/NeoVehicleSoundConfigSync.java)
+
+- **去掉 `.optional()`** —— `event.registrar(PAYLOAD_VERSION)`（`"1.0.0"`），包变成非 optional；
+- **删掉 `player.connection.hasChannel(...)` 那道判断** —— 协商阶段已经保证了通道存在，留着是死代码；
+- 类注释改成说明它的第二重身份：一致性校验。
+
+编译通过，产物里 `optional` / `hasChannel` 引用数都是 0。
+
+## 这为什么真的能拦住不一致的客户端
+
+查了 NeoForge 21.1.219 源码，不是"只打日志"：
+
+- `NetworkRegistry` 在配置阶段做 payload 协商，失败时向客户端发 `ModdedNetworkSetupFailedPayload(failureReasons)`（**客户端能在断开界面看到缺失/不匹配的通道清单**），然后以 `multiplayer.disconnect.incompatible` 断开；
+- 非 optional 的包缺失 → 协商失败；payload 版本字符串不一致 → 同样被拒绝。
+
+所以现在的效果是：**没装本兼容的客户端连不进来**，装了但 payload 版本不同的也连不进来 —— 不会出现"连得进来、却收不到服务端下发的配置"这种更难查的状态。这与 CGC 自身的做法一致（`NeoNetworkAdapter` 用 `event.registrar(modId)` 也是非 optional，所以缺 CGC 的客户端本来就已经被拒了），另外 vanilla 客户端在服务器有必需 payload 时也会被拒——这一点在你装上 CGC/MM 的服务器上原本就成立，不是这次新引入的。
+
+## 两点需要你知道
+
+1. **`PAYLOAD_VERSION` 现在是一条契约**：以后改这个包的编解码或处理逻辑（比如加字段），必须同步上调这个字符串，否则新旧客户端会静默互通。我把这条规则写在常量注释里了。如果你希望"任何兼容模组版本差异都直接拒绝"，可以把它换成运行时读到的 mod 版本（`ModList` 取 `0.0.12.1` 之类），代价是每次发版所有客户端都得更新——要的话我改。
+2. **服务端无法验证客户端"确实应用了"**：包走 TCP 必达，且 `applyOnClient()` 不会失败，所以正常流程下不存在漏应用；但如果要防"改过的客户端收到包后不执行"，那需要客户端回一个确认包（C2S）由服务端校验，那是另一套机制，现在没做。
+
+## 验收
+
+1. **双端一致性**：把某个客户端的 `cgccmachinemax-*.jar` 换成旧版或删掉，连接服务端 → 应在断开界面看到包含 `cgccmachinemax:vehicle_sound_config` 的缺失通道列表。
+2. **配置权威**：客户端本地文件保持默认（或改乱），只在**服务端**把 `vehicleSoundDistance` 设成 `40` 重启，客户端连上后应在 ~640 格处才听不到引擎/轮胎摩擦。
+
+产物：[cgccmachinemax-0.0.12.1-neoforge-1.21.1.jar](neoforge-compat/build/libs/cgccmachinemax-0.0.12.1-neoforge-1.21.1.jar)（01:02）。运行时我这边测不了，上面两条要你实际跑一遍。改动仍未提交。
