@@ -177,3 +177,153 @@ Let me check the split-vehicle lifecycle, HP behavior, and git history for any d
 - **存活部件脱落：MachineMax 没有任何衰减或清理机制**，`discardOnDetach` 是唯一手段。
 
 因此 `discardOnDetach` 不能清理 —— 除非你确认只在意"残骸"（已摧毁部件），那才可以只靠 MachineMax 配置。要不要动，你定；我没有改任何代码。
+
+# 
+
+```
+那么需要检查一下目前两个配置项allowEntityRemoval和discardOnDetach的实现方式：
+- 目前用CGC Compat里的MachineMax旧版本.jar玩下来是有崩溃问题，有的时候是kill @e[选中]之后立即崩溃，有的没立即，但是之前有kill过
+- E:\Software\Minecraft\neoforge1.21.1server\hs_err_pid1032.log有一个崩溃log，注意内容很多，每次只能读几行，不要一下子读完，不然上下文长度一下就满了；这个崩溃log不对应最新的debug.log，之后又崩过两次，但是因为在测试所以没管，并且最新两次的崩溃log删了（大概率是相同问题导致的）
+- 检查一下这个log，看看有没有什么信息，以及当前removal的兼容实现方式是否可以改为给一个极大伤害，来融入MachineMax自己的销毁逻辑，而不手动涉及可能导致副作用的操作
+```
+
+# 
+
+I'll read the two remaining compat implementations and start on the crash log carefully.
+
+Crash is a native `EXCEPTION_ACCESS_VIOLATION` inside `bulletjme.dll` (JBullet physics). Let me find the stack frames.
+
+Crash is on the **physics thread** (`PhysicsLevel.run` → `PhysicsSpace.stepSimulation`, native `bulletjme.dll`). Let me check whether MachineMax removal is thread-safe and where `removePart` is used.
+
+MachineMax gates all physics mutations through `submitImmediateTask(PPhase...)`. Let me see whether `removePart` respects that.
+
+Let me see how `Part.destroy()` tears down bodies and find the actual physics-body removal API.
+
+Key lead: let me check the thread context of MachineMax's own `removePart` callers.
+
+The crash is on the **"Server PhysicsThread"** inside `stepSimulation`. Let me check thread-safety of joint teardown and look at the log's thread list.
+
+`AbstractConnector.destroy()` wraps joint removal in `submitImmediateTask(PPhase.ALL)` — but `DestroyableRigidObject.destroy()` calls `removePhysicsBody` unwrapped. Let me check whether that API defers internally.
+
+`removePhysicsBody` internally defers via `submitImmediateTask` — so body removal is not the raw race. Let me check the joint/peer teardown path.
+
+我读完了实现和崩溃日志。先说日志结论，再说实现评估。
+
+## 崩溃日志
+
+`hs_err_pid1032.log`（360 KB，我只取了关键段）：
+
+```
+Current thread: JavaThread "Server PhysicsThread" daemon [_thread_in_native]
+Native frames:  C  [bulletjme.dll+0x79386]
+Java frames:
+  J  com.jme3.bullet.PhysicsSpace.stepSimulation(JFIFI)V   spark_core
+  J  cn.solarmoon.spark_core.physics.level.PhysicsLevel.run
+  J  ...PhysicsLevel$run$1.invokeSuspend
+siginfo: EXCEPTION_ACCESS_VIOLATION, writing address 0x0000000000000374
+```
+
+- 是 **JBullet 原生库崩溃**（`bulletjme.dll`），不是 Java 异常。写入 `0x374` 这种小偏移，典型的"空指针/已释放对象解引用"。
+- 崩在 **物理线程** 的 `stepSimulation` 里，up time 12 分钟。
+- **整条栈里没有任何 MachineMax / cgccompat / customgun 的帧** —— 说明损坏是更早发生的，物理世界里残留了一个引用已移除刚体的约束/对象，之后某次 step 才踩雷。这和你说的"有的没立即崩、但之前 kill 过"完全吻合。
+
+## 当前实现
+
+- `allowEntityRemoval`：[`MMPartEntityRemovalMixin`](D:/Github/CGC-Compat-MachineMax/core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/mixin/entity/MMPartEntityRemovalMixin.java) 覆写 `Entity#remove(RemovalReason)`，启用时 **同步** 调 `VehicleCore.removePart(part)` 并跳过 `super.remove`。
+- `discardOnDetach`：[`DetachedPartDiscard`](D:/Github/CGC-Compat-MachineMax/core/src/main/java/dev/xcolorful/cgccompat/machinemax/core/util/DetachedPartDiscard.java) 在 `addSpiltVehicle` 登记分裂载具，到 `LevelTickEvent.Post` 对它的每个 part 调 `removePart`。
+
+我用 javap 核了底层：`PhysicsBodyExtensionKt.removePhysicsBody` 内部就是 `TaskSubmitOffice.submitImmediateTask`（反编译确认），[`AbstractConnector.detachJoint`](D:/Github/Machine-Max/src/main/java/io/github/sweetzonzi/machine_max/common/mech/vehicle/connector/AbstractConnector.java) 和 `AbstractConnector.destroy` 也都走 `submitImmediateTask(PPhase...)`。
+
+**所以兼容不是在裸改原生对象** —— 刚体/关节的移除本身都被正确投递到物理线程了。崩溃更可能来自**移除的时机与规模**，而不是单纯线程不安全：
+
+- compat 在 `Entity#remove`（`kill @e` 实体遍历中）和 `LevelTickEvent.Post` 里成批拆载具；`removePart` 内部还会 `partNetSpiltCheck()` 再分裂出**新载具并立刻又移除**（`DetachedPartDiscard` 的 while 循环会在同一 tick 内级联处理这些新载具），一 tick 内产生大量"加刚体 / 拆刚体+关节"的任务突发。MachineMax 自己只在 `VehicleCore.preTick` 一次处理一个已摧毁部件。
+
+## "给极大伤害"能否替代
+
+方向合理，但有坑：
+
+1. **最终仍会走 `removePart`**。伤害路径是：耐久→0 → `preTick` 的 `checkDestroyed` → `setDestroyed` → 销毁倒计时 → `SubPart.destroy` → `Part.onTick` 标 `destroyed` → **`VehicleCore.preTick` 调 `removePart`**。也就是说它没有绕开 `removePart`，只是把它挪到了 MachineMax 自己的 tick 点上。如果损坏源就是 `removePart` 本身，这样改救不了。
+2. **会有延迟**。倒计时初值 = `max(最大耐久 × subpart_destroy_ticks_per_durability, subpart_destroy_min_ticks)`，默认至少 **200 tick（10 秒）**。要让部件"秒没"就得把 MachineMax 服务端配置 `subpart_destroy_min_ticks=0` + `subpart_destroy_ticks_per_durability=0` —— 变成依赖用户改 MachineMax 配置，而且所有被摧毁部件都会失去黑化/淡出动画。
+3. 若用 `onHurt` 施加伤害，还会附带命中管线副作用（冲击分配到连接件→可能再次分裂、击退、音效、子系统伤害）。要就走 `subPart.setDurability(0)`（public，直接进销毁流程）。
+
+**更对症的做法**（如果确认是时机的锅）：不加伤害，而是把移除**排队**，改在 MachineMax 自己的 [`VehicleCore.preTick`](D:/Github/Machine-Max/src/main/java/io/github/sweetzonzi/machine_max/common/mech/vehicle/VehicleCore.java) 尾部（mixin TAIL）统一执行 `removePart`。这样既避免了在 `Entity#remove` / `LevelTickEvent.Post` 这种"任意时机 + 级联突发"，又没有倒计时延迟，也不引入伤害语义。
+
+## 建议的下一步（先定位再改）
+
+1. **二分开关**：分别关掉 `allowEntityRemoval` / `discardOnDetach` 复现，定位是哪个在触发。
+2. **换 fork 复现**：这份 log 是旧 jar（1.0.1-beta.1）的，fork 大改了 split/detach（`ConnectorDetachEvent`、`distributeSplitHp` 等）。先在 fork 上测，很可能上游已经修了。
+3. **裸 MachineMax 对照**：不打兼容、纯 MachineMax 摧毁部件/`kill @e` 部件，看是否也会崩 —— 如果是，那是 MachineMax/SparkCore 的悬挂约束问题，兼容只是把它放大了。
+
+我没有改任何代码。你决定方向后我再动手（我倾向先做 1 和 2 的定位，再谈是否需要改实现）。
+
+# 
+
+```
+目前发现fork的MachineMax依赖其他几个github仓库，有个SparkCore虽然MIT但是MachineMax实际上需要github token来访问spark core剩余部分，也就是最新fork默认是用不了的。
+需要做以下几件事：
+- 之前对话里有检查是否MachineMax的config已有实现从而移除，如果是最新fork有实现但是旧版本没有实现的，要从git历史里补回来
+- 更改discard逻辑部分也要实现，但以旧版本为准，新fork的修改什么时候上线都是未知的，到时候再适配最新版
+```
+
+# 
+
+Let me re-verify what the OLD jar (which the compat actually compiles against) contains, before restoring anything.
+
+Old jar lacks `DistantVehicleRenderer` but **has** `should_destroy_blocks`. Let me check the old API surface for the discard path and confirm the deleted files are recoverable from HEAD.
+
+My earlier changes appear committed. Let me check the log and re-run javap with the old package names.
+
+The cleanup landed in commit `fba3504`. Let me see exactly what it changed and get the old `VehicleCore` API.
+
+Old API confirmed compatible. Let me check the old `VehicleCore.preTick` body to see if it already removes destroyed parts (which would give a clean, native hook).
+
+Now I have what I need. Let me restore the render-distance compat from the pre-cleanup commit (`fba3504^`) — the old jar genuinely lacks `DistantVehicleRenderer`.
+
+Now re-apply the render-distance config edits (excluding the griefing ones).
+
+Let me verify the restore compiles against the old jar.
+
+Task A compiles. Now for the removal logic. Let me verify MachineMax's tick driver and whether the `destroyed` flag is used elsewhere.
+
+`VehicleCore.preTick` is driven by `ObjectManager`. Let me confirm the old jar drives it the same way (the mechanism depends on it).
+
+Now the removal-logic change. I'll fold removal into MachineMax's own `VehicleCore.preTick` by setting `Part#destroyed` instead of calling `removePart` directly.
+
+Let me compile and review the full diff.
+
+全部完成，编译通过（`BUILD SUCCESSFUL`）。
+
+## 1. 渲染距离兼容：已从 git 恢复
+
+核实结论：**旧 jar（1.0.1-beta.1）没有 `DistantVehicleRenderer`**（`unzip -l` 确认），所以"fork 能自动渲染远处载具"这条理由对 compat 实际面对的旧版不成立 —— 渲染距离兼容必须留着。
+
+从 `fba3504^` 恢复了：
+- 文件：`PartEntityRendererMixin.java`、`ModEntities.java`、`EntityTypeAccessor.java`、`cgccmachinemaxclient.mixins.json`
+- 配置与接线：`CgccMMConfigTag`/`CgccMMConfig` 的 `modifyRenderDistance`/`renderDistance`、`CommonSetup` 调用、`neoforge.mods.toml` 的 client mixin 条目、`cgccmachinemax.mixins.json` 的 `entity.EntityTypeAccessor`、README 中英两行
+
+**griefing 没有恢复** —— 旧 jar 的 `MMServerConfig` **有** `should_destroy_blocks`（javap 确认），"冗余"判断对旧版同样成立，所以不属于"fork 有、旧版没有"。
+
+> ⚠️ 但有一条要你定：`followMobGriefing`（跟随 mobGriefing 游戏规则）**MachineMax 新旧都没有**，它不是被我按"冗余"删的，而是你当时决定整模块删除。它不属于你这条规则覆盖的范围，要不要单独恢复，你说。
+
+（另：旧 jar 没有 `projectile_destroy_blocks`，那是 fork 新增的；compat 本来也没覆盖射弹破坏路径。）
+
+## 2. discard / 移除逻辑：改为融入 MachineMax 自身销毁流程
+
+**改前**：`MMPartEntityRemovalMixin` 在 `Entity#remove` 里直接 `vehicle.removePart(part)`；`DetachedPartDiscard` 在 `LevelTickEvent.Post` 直接 `removePart`。
+
+**改后**：两处都只置 `Part.destroyed = true`，实际移除交给 MachineMax 自己的 `VehicleCore#preTick`（由 `ObjectManager.onPreTick` → `LevelTickEvent.Pre` 驱动）里那句 `if (part.isDestroyed()) removePart(part);` —— 与 MachineMax 正常摧毁部件**完全同一条路径**。兼容端不再在任何时机同步拆刚体/关节。
+
+**为什么没用你说的"给极大伤害"**：伤害路径会走 `checkDestroyed → setDestroyed → 销毁倒计时`，`getInitialDestroyTimeTicks()` 默认 `max(最大耐久×10, 200)`，也就是**至少 10 秒**才移除，还带黑化/销毁音效；要做到"秒没"还得让用户去改 MachineMax 服务端配置 `subpart_destroy_min_ticks=0`。直接置 `destroyed` 则一步跳进 `preTick` 那个移除分支：无延迟、不经过伤害管线（不会附带冲击分配/击退/音效）。
+
+已核实的旧版事实（都用 javap 对 `libs/MachineMax-1.21.1-1.0.1-beta.1.jar` 验证）：
+- `VehicleCore.preTick` 确有该分支：字节码 `Part.isDestroyed()Z → removePart(Part)V`
+- `ObjectManager.onPreTick` 对维度内**所有**载具无条件调 `preTick`（`updateVehicleChunk` 只更新标志，不门控调用）
+- `Part.destroyed` 是 `public` 字段，且只被 `VehicleCore.preTick` 读取，无隐藏语义
+
+`discardOnDetach` 的延后结构保留（仍在 `LevelTickEvent.Post` 标记）：让标记落在分裂流程之外，实际移除在下一 tick 的 `preTick`，移除包自然晚于 `ConnectorDetachPayload`。
+
+## 注意
+
+- 这是对"物理线程崩溃"的**假设性修复**，我无法保证根因就是这个 —— 建议实机验证：`kill @e[type=machine_max:part]` 后部件是否一两 tick 内消失且重进不回来；打轮胎脱落部件同理。
+- `allowEntityRemoval` 现在有**一 tick 延迟**（实体在下个 `LevelTickEvent.Pre` 才被移除）。
+- 未提交。改动都在工作区（恢复的文件是 staged，编辑未 staged）。

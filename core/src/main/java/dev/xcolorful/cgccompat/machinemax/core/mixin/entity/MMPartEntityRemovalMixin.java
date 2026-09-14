@@ -35,8 +35,9 @@ import org.spongepowered.asm.mixin.Unique;
  * <p>
  * 只移除实体是不够的：{@code MMPartEntity} 是 {@code noSave} 的瞬态实体，真正的持久化载体是
  * {@code VehicleCore}/{@code Part}/{@code SubPart}，{@code SubPart#postTick} 会把实体重建回来。
- * 所以启用时要把该 part 一起从载具上摘除（{@code VehicleCore#removePart}），
- * 既不会重建，也不会留在载具存档里。
+ * 所以启用时要把该 part 一起从载具上摘除 —— 做法是置 {@code Part#destroyed}，由 MachineMax 自己的
+ * {@code VehicleCore#preTick}（{@code LevelTickEvent.Pre} 驱动）走正常流程 {@code removePart}，
+ * 既不会重建，也不会留在载具存档里；兼容端不再在任意时机同步拆刚体/关节。
  */
 @Mixin(MMPartEntity.class)
 public abstract class MMPartEntityRemovalMixin extends Entity {
@@ -67,14 +68,15 @@ public abstract class MMPartEntityRemovalMixin extends Entity {
         // 未启用：拦截，保持部件实体不被主动清掉
         if (!CgccMMConfig.entityRemovalAllowed) return true;
 
-        // 启用：把 part 一起摘掉。客户端不做载具结构改动，等服务端的 PartRemovePayload
+        // 启用：标记该 part 已摧毁，移除交给 MachineMax 自己。
+        // VehicleCore#preTick（LevelTickEvent.Pre 驱动）会对 destroyed 的 part 调 removePart，
+        // 与 MachineMax 正常摧毁部件走同一条路径，兼容端不再在 Entity#remove（如 kill @e）这种任意时机同步拆刚体/关节。
+        // 客户端不做载具结构改动，等服务端下发的 PartRemovePayload。
         if (!self.level().isClientSide()) {
             Part part = subPart.part;
             VehicleCore vehicle = part.vehicle;
             if (vehicle != null && vehicle.partMap.containsKey(part.uuid)) {
-                // removePart 内部经 SubPart#destroy 已经把这个实体移除了（那一层 subPart 已为 null，
-                // 会走回 super.remove），所以这里直接跳过外层调用，避免 setRemoved 被走第二遍
-                vehicle.removePart(part);
+                part.destroyed = true;
                 return true;
             }
         }
