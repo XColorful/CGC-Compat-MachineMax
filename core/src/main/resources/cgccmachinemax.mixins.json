@@ -8,6 +8,9 @@
     "entity.MMPartEntityMixin",
     "entity.MMPartEntityRemovalMixin",
     "entity.GunProjectileMixin",
+    "network.MovementInputPayloadMixin",
+    "network.RegularInputPayloadMixin",
+    "network.SubsystemInteractPayloadMixin",
     "vehicle.ObjectManagerMixin"
   ],
   "injectors": {
