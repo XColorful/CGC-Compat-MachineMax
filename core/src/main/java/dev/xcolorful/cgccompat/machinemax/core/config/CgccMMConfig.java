@@ -26,15 +26,6 @@ public final class CgccMMConfig {
     private static final boolean DEFAULT_DISCARD_ON_DETACH = true;
     private static final boolean DEFAULT_CONCURRENT_SOUND_LIMIT_ENABLED = false;
     private static final int DEFAULT_MAX_CONCURRENT_SOUNDS = 8;
-    private static final boolean DEFAULT_MODIFY_RENDER_DISTANCE = true;
-    private static final int DEFAULT_RENDER_DISTANCE = 20;
-    private static final boolean DEFAULT_FOLLOW_MOB_GRIEFING = true;
-    private static final boolean DEFAULT_FORCE_DISABLE_GRIEFING = false;
-
-    /**
-     * 渲染距离下限（区块）
-     */
-    private static final int MIN_RENDER_DISTANCE = 1;
 
     /**
      * 是否允许 {@code kill @e} / {@code Entity#discard()} 等主动手段移除部件实体。
@@ -62,35 +53,6 @@ public final class CgccMMConfig {
      * 允许同时播放的 MachineMax 音频数量上限。当前未实现，仅保留配置项。
      */
     public static int maxConcurrentSounds = DEFAULT_MAX_CONCURRENT_SOUNDS;
-
-    /**
-     * 是否修改部件实体的可见范围。
-     * <p>
-     * MachineMax 用客户端渲染距离截断部件渲染、且实体同步范围只有默认的 5 区块，
-     * 载具稍远就整台消失；置 {@code true} 时按 {@link #renderDistance} 统一这两个范围。
-     */
-    public static boolean modifyRenderDistance = DEFAULT_MODIFY_RENDER_DISTANCE;
-
-    /**
-     * 部件实体的可见范围，单位为区块
-     */
-    public static int renderDistance = DEFAULT_RENDER_DISTANCE;
-
-    /**
-     * 载具破坏方块是否跟随 mobGriefing 游戏规则。
-     * <p>
-     * {@code true}（默认）时 {@code mobGriefing=false} 会拦截载具对方块的破坏，
-     * 方块按不可破坏处理；{@code false} 时不检查游戏规则，保持 MachineMax 原本行为。
-     */
-    public static boolean followMobGriefing = DEFAULT_FOLLOW_MOB_GRIEFING;
-
-    /**
-     * 强制拦截载具对方块的破坏。
-     * <p>
-     * {@code true} 时无视 {@link #followMobGriefing} 与游戏规则，始终拦截；
-     * {@code false}（默认）时是否拦截由 {@link #followMobGriefing} 与 mobGriefing 决定。
-     */
-    public static boolean forceDisableGriefing = DEFAULT_FORCE_DISABLE_GRIEFING;
 
     private CgccMMConfig() {
     }
@@ -120,10 +82,6 @@ public final class CgccMMConfig {
                 case CgccMMConfigTag.DISCARD_ON_DETACH -> discardOnDetach = JsonUtils.readBoolean(reader);
 //                case CgccMMConfigTag.CONCURRENT_SOUND_LIMIT_ENABLED -> concurrentSoundLimitEnabled = JsonUtils.readBoolean(reader);
 //                case CgccMMConfigTag.MAX_CONCURRENT_SOUNDS -> maxConcurrentSounds = Math.max(0, JsonUtils.readInt(reader));
-                case CgccMMConfigTag.MODIFY_RENDER_DISTANCE -> modifyRenderDistance = JsonUtils.readBoolean(reader);
-                case CgccMMConfigTag.RENDER_DISTANCE -> renderDistance = Math.max(MIN_RENDER_DISTANCE, JsonUtils.readInt(reader));
-                case CgccMMConfigTag.FOLLOW_MOB_GRIEFING -> followMobGriefing = JsonUtils.readBoolean(reader);
-                case CgccMMConfigTag.FORCE_DISABLE_GRIEFING -> forceDisableGriefing = JsonUtils.readBoolean(reader);
                 default -> reader.skipValue();
             }
         }
@@ -145,10 +103,6 @@ public final class CgccMMConfig {
                     JsonUtils.writeBoolean(writer, CgccMMConfigTag.DISCARD_ON_DETACH, discardOnDetach);
 //                    JsonUtils.writeBoolean(writer, CgccMMConfigTag.CONCURRENT_SOUND_LIMIT_ENABLED, concurrentSoundLimitEnabled);
 //                    JsonUtils.writeInt(writer, CgccMMConfigTag.MAX_CONCURRENT_SOUNDS, maxConcurrentSounds);
-                    JsonUtils.writeBoolean(writer, CgccMMConfigTag.MODIFY_RENDER_DISTANCE, modifyRenderDistance);
-                    JsonUtils.writeInt(writer, CgccMMConfigTag.RENDER_DISTANCE, renderDistance);
-                    JsonUtils.writeBoolean(writer, CgccMMConfigTag.FOLLOW_MOB_GRIEFING, followMobGriefing);
-                    JsonUtils.writeBoolean(writer, CgccMMConfigTag.FORCE_DISABLE_GRIEFING, forceDisableGriefing);
                 }
                 writer.endObject();
             }
