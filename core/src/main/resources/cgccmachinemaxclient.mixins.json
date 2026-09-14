@@ -4,7 +4,10 @@
   "compatibilityLevel": "JAVA_21",
   "refmap": "cgccmachinemax.refmap.json",
   "client": [
-    "renderer.PartEntityRendererMixin"
+    "renderer.PartEntityRendererMixin",
+    "sound.CarControllerSubsystemSoundMixin",
+    "sound.GearboxSubsystemSoundMixin",
+    "sound.WheelDriverSubsystemSoundMixin"
   ],
   "injectors": {
     "defaultRequire": 1
