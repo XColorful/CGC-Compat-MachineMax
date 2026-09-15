@@ -1,5 +1,11 @@
 ### 0.0.x
 
+#### 0.0.12.3
+
+Update `./config/cgccmachinemax.json`:
+- enableSoundRefresh: Whether to enable sound volume self-healing (automatic cleanup when vehicle sounds exhaust the channel pool and mute everything)
+- soundRefreshIntervalTicks: Interval of the sound volume self-healing (in ticks, 1 means every tick)
+
 #### 0.0.12.2
 - Fix crash caused by vehicle removal
 - Fix vehicle seat occupancy check
