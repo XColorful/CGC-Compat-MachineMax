@@ -28,6 +28,8 @@
 在`./config/cgccmachinemax.json`可配置以下选项：
 - allowEntityRemoval：是否允许 _/kill_ 等方式移除载具
 - discardOnDetach：载具部件脱离后是否立即清除
+- enableSoundRefresh：是否启用音量自愈（载具音效占满声道导致整体静音时的自动清理）
+- soundRefreshIntervalTicks：音量自愈的执行间隔（tick，1 表示每 tick）
 - modifyRenderDistance：是否修改载具渲染距离（需要服务端配置）
 - renderDistance：载具渲染距离（区块）
 - modifyVehicleSoundDistance：是否修改载具声音距离（需要服务端配置）
@@ -69,6 +71,8 @@ When this mod is installed, the following features take effect automatically:
 The following options can be configured in `./config/cgccmachinemax.json`:
 - allowEntityRemoval: Whether vehicles can be removed using _/kill_ and other methods
 - discardOnDetach: Whether vehicle parts are immediately discarded when they detach
+- enableSoundRefresh: Whether to enable sound volume self-healing (automatic cleanup when vehicle sounds exhaust the channel pool and mute everything)
+- soundRefreshIntervalTicks: Interval of the sound volume self-healing (in ticks, 1 means every tick)
 - modifyRenderDistance: Whether to modify the vehicle render distance (requires server-side configuration)
 - renderDistance: Vehicle render distance (in chunks)
 - modifyVehicleSoundDistance: Whether to modify the vehicle sound distance (requires server-side configuration)
