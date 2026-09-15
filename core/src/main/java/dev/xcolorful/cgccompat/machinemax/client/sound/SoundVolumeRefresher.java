@@ -1,5 +1,6 @@
 package dev.xcolorful.cgccompat.machinemax.client.sound;
 
+import dev.xcolorful.cgccompat.machinemax.core.config.CgccMMConfig;
 import dev.xcolorful.customgun.client.util.ClientInputUtils;
 import dev.xcolorful.customgun.core.api.event.EventType;
 import dev.xcolorful.customgun.core.api.event.IEvent;
@@ -27,8 +28,10 @@ import net.minecraft.sounds.SoundSource;
  * （{@code SoundEngine#tickNonPaused} 只在<b>类别</b>音量为 0 时才停声道，
  * 不会清理「距离远到听不见」的载具音效，所以被占住的声道会一直留着。）
  * <p>
- * 本类就是把「拨滑块」这一下做成每 tick 自动执行：在 client tick 前后各刷一次，
- * 这样即使静音发生在 tick 中途也能在下一个边界补上。
+ * 本类就是把「拨滑块」这一下按 {@link CgccMMConfig#soundRefreshIntervalTicks} 自动执行，
+ * 默认每 tick 一次。挂在 {@code ClientTickEvent.Pre} 上：这时候上一 tick 的声音引擎已经跑完，
+ * 而本 tick 的 {@code SoundEngine#tick}（里面才做 {@code ChannelAccess#scheduleTick} 的声道释放）
+ * 还没执行，所以停掉的声道能在同一 tick 内就被收回去。
  */
 public class SoundVolumeRefresher implements IEventHandler {
     private static class SoundVolumeRefresherHolder {
@@ -39,6 +42,11 @@ public class SoundVolumeRefresher implements IEventHandler {
     }
     protected SoundVolumeRefresher() {}
 
+    /**
+     * 距上次刷新的 client tick 数
+     */
+    private int tickCounter;
+
     @Override
     public String getEventHandlerName() {
         return this.getClass().getName();
@@ -47,9 +55,17 @@ public class SoundVolumeRefresher implements IEventHandler {
     @Override
     public void handleEvent(EventType eventType, IEvent event) {
         switch (eventType) {
-            case PREPARE_CLIENT_TICK_EVENT, CLIENT_TICK_EVENT -> refreshVolume();
+            case PREPARE_CLIENT_TICK_EVENT -> onPrepareClientTick();
             default -> onReceiveWrongEvent(eventType);
         }
+    }
+
+    private void onPrepareClientTick() {
+        if (!CgccMMConfig.enableSoundRefresh) return;
+        if (++this.tickCounter < CgccMMConfig.soundRefreshIntervalTicks) return;
+        this.tickCounter = 0;
+
+        refreshVolume();
     }
 
     private void refreshVolume() {

@@ -24,8 +24,8 @@ public final class CgccMMConfig {
 
     private static final boolean DEFAULT_ALLOW_ENTITY_REMOVAL = true;
     private static final boolean DEFAULT_DISCARD_ON_DETACH = true;
-    private static final boolean DEFAULT_CONCURRENT_SOUND_LIMIT_ENABLED = false;
-    private static final int DEFAULT_MAX_CONCURRENT_SOUNDS = 8;
+    private static final boolean DEFAULT_ENABLE_SOUND_REFRESH = true;
+    private static final int DEFAULT_SOUND_REFRESH_INTERVAL_TICKS = 1;
     private static final boolean DEFAULT_MODIFY_RENDER_DISTANCE = true;
     private static final int DEFAULT_RENDER_DISTANCE = 20;
     private static final boolean DEFAULT_MODIFY_VEHICLE_SOUND_DISTANCE = true;
@@ -40,6 +40,11 @@ public final class CgccMMConfig {
      * 载具音效传播距离下限（区块）
      */
     private static final int MIN_VEHICLE_SOUND_DISTANCE = 1;
+
+    /**
+     * 音量自愈间隔下限（tick）
+     */
+    private static final int MIN_SOUND_REFRESH_INTERVAL_TICKS = 1;
 
     /**
      * 是否允许 {@code kill @e} / {@code Entity#discard()} 等主动手段移除部件实体。
@@ -59,14 +64,22 @@ public final class CgccMMConfig {
     public static boolean discardOnDetach = DEFAULT_DISCARD_ON_DETACH;
 
     /**
-     * 是否限制 MachineMax 的并发音频数量。当前未实现，仅保留配置项。
+     * 是否启用音量自愈。
+     * <p>
+     * MachineMax 的载具音效（SparkCore {@code SpreadingSoundInstance}）每个实例占一个 OpenAL 声道，
+     * 且没有并发上限；远处载具的持续音效会把声道池占满，新音效拿不到声道就被丢弃，表现成整个游戏突然静音。
+     * 置 {@code true}（默认）时周期性重算并下发所有声道的音量，把听不见的声道停掉、释放回池子，
+     * 等效于手动去声音设置里拨一下音量滑块。
      */
-    public static boolean concurrentSoundLimitEnabled = DEFAULT_CONCURRENT_SOUND_LIMIT_ENABLED;
+    public static boolean enableSoundRefresh = DEFAULT_ENABLE_SOUND_REFRESH;
 
     /**
-     * 允许同时播放的 MachineMax 音频数量上限。当前未实现，仅保留配置项。
+     * 音量自愈的执行间隔，单位为 client tick。
+     * <p>
+     * {@code 1}（默认）表示每 tick 执行，恢复最快；调大可以降低开销，
+     * 但静音后最长要等这么久才恢复，且这段窗口内起的新音效会一直丢失。
      */
-    public static int maxConcurrentSounds = DEFAULT_MAX_CONCURRENT_SOUNDS;
+    public static int soundRefreshIntervalTicks = DEFAULT_SOUND_REFRESH_INTERVAL_TICKS;
 
     /**
      * 是否修改部件实体的可见范围。
@@ -137,8 +150,8 @@ public final class CgccMMConfig {
             switch (reader.nextName()) {
                 case CgccMMConfigTag.ALLOW_ENTITY_REMOVAL -> entityRemovalAllowed = JsonUtils.readBoolean(reader);
                 case CgccMMConfigTag.DISCARD_ON_DETACH -> discardOnDetach = JsonUtils.readBoolean(reader);
-//                case CgccMMConfigTag.CONCURRENT_SOUND_LIMIT_ENABLED -> concurrentSoundLimitEnabled = JsonUtils.readBoolean(reader);
-//                case CgccMMConfigTag.MAX_CONCURRENT_SOUNDS -> maxConcurrentSounds = Math.max(0, JsonUtils.readInt(reader));
+                case CgccMMConfigTag.ENABLE_SOUND_REFRESH -> enableSoundRefresh = JsonUtils.readBoolean(reader);
+                case CgccMMConfigTag.SOUND_REFRESH_INTERVAL_TICKS -> soundRefreshIntervalTicks = Math.max(MIN_SOUND_REFRESH_INTERVAL_TICKS, JsonUtils.readInt(reader));
                 case CgccMMConfigTag.MODIFY_RENDER_DISTANCE -> modifyRenderDistance = JsonUtils.readBoolean(reader);
                 case CgccMMConfigTag.RENDER_DISTANCE -> renderDistance = Math.max(MIN_RENDER_DISTANCE, JsonUtils.readInt(reader));
                 case CgccMMConfigTag.MODIFY_VEHICLE_SOUND_DISTANCE -> modifyVehicleSoundDistance = JsonUtils.readBoolean(reader);
@@ -162,8 +175,8 @@ public final class CgccMMConfig {
                 writer.beginObject(); {
                     JsonUtils.writeBoolean(writer, CgccMMConfigTag.ALLOW_ENTITY_REMOVAL, entityRemovalAllowed);
                     JsonUtils.writeBoolean(writer, CgccMMConfigTag.DISCARD_ON_DETACH, discardOnDetach);
-//                    JsonUtils.writeBoolean(writer, CgccMMConfigTag.CONCURRENT_SOUND_LIMIT_ENABLED, concurrentSoundLimitEnabled);
-//                    JsonUtils.writeInt(writer, CgccMMConfigTag.MAX_CONCURRENT_SOUNDS, maxConcurrentSounds);
+                    JsonUtils.writeBoolean(writer, CgccMMConfigTag.ENABLE_SOUND_REFRESH, enableSoundRefresh);
+                    JsonUtils.writeInt(writer, CgccMMConfigTag.SOUND_REFRESH_INTERVAL_TICKS, soundRefreshIntervalTicks);
                     JsonUtils.writeBoolean(writer, CgccMMConfigTag.MODIFY_RENDER_DISTANCE, modifyRenderDistance);
                     JsonUtils.writeInt(writer, CgccMMConfigTag.RENDER_DISTANCE, renderDistance);
                     JsonUtils.writeBoolean(writer, CgccMMConfigTag.MODIFY_VEHICLE_SOUND_DISTANCE, modifyVehicleSoundDistance);
