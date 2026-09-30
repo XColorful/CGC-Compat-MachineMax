@@ -35,12 +35,6 @@
 - modifyVehicleSoundDistance：是否修改载具声音距离（需要服务端配置）
 - vehicleSoundDistance：载具声音距离（区块）
 
-## 内容披露
-
-### 衍生内容
-
-- [自定义枪械永续](https://github.com/XColorful/Custom-Gun-Continued)：本模组是采用 [GPL-3.0-only](https://www.gnu.org/licenses/gpl-3.0.txt) 许可证的[自定义枪械永续](https://github.com/XColorful/Custom-Gun-Continued)的兼容模组
-
 ## 许可证
 
 - 代码：[GPL-3.0-only](https://www.gnu.org/licenses/gpl-3.0.txt)
@@ -77,12 +71,6 @@ The following options can be configured in `./config/cgccmachinemax.json`:
 - renderDistance: Vehicle render distance (in chunks)
 - modifyVehicleSoundDistance: Whether to modify the vehicle sound distance (requires server-side configuration)
 - vehicleSoundDistance: Vehicle sound distance (in chunks)
-
-## Content disclosures
-
-### Derivative content
-
-- [Custom Gun Continued](https://github.com/XColorful/Custom-Gun-Continued): This mod is a compatibility mod for [Custom Gun Continued](https://github.com/XColorful/Custom-Gun-Continued), licensed under [GPL-3.0-only](https://www.gnu.org/licenses/gpl-3.0.txt)
 
 ## License
 
